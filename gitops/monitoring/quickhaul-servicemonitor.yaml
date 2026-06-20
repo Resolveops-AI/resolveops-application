@@ -1,0 +1,20 @@
+# PLACEHOLDER: QuickHaul does not currently expose application-level metrics via /metrics.
+# When the application is updated to expose Prometheus metrics, this ServiceMonitor can be uncommented and applied.
+# This ensures we do not claim application metrics exist when they do not.
+#
+# apiVersion: monitoring.coreos.com/v1
+# kind: ServiceMonitor
+# metadata:
+#   name: quickhaul
+#   namespace: monitoring
+# spec:
+#   selector:
+#     matchLabels:
+#       app: quickhaul
+#   namespaceSelector:
+#     matchNames:
+#       - quickhaul-dev
+#       - quickhaul-prod
+#   endpoints:
+#     - port: http
+#       path: /metrics

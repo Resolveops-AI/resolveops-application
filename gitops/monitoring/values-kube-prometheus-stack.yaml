@@ -1,0 +1,18 @@
+grafana:
+  adminPassword: ""
+  admin:
+    existingSecret: "grafana-admin-secret"
+    userKey: admin-user
+    passwordKey: admin-password
+  # In order to auto-load the dashboard we will use a ConfigMap sidecar or similar,
+  # but for this configuration we'll keep it simple as requested.
+
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false

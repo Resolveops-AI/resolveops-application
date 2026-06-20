@@ -9,6 +9,14 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  WORKLOAD_IDENTITY_CLIENT_ID: ${{ vars.WORKLOAD_IDENTITY_CLIENT_ID }}
+  KEY_VAULT_NAME: ${{ vars.KEY_VAULT_NAME }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+  AKS_NAMESPACE: resolveops-dev
+  GITHUB_SHA: ${{ github.sha }}
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -50,15 +58,13 @@ jobs:
         uses: azure/login@v1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build and Push to ACR
+      - name: Build Docker Image
         run: |
-          az acr login --name ${{ vars.ACR_NAME }}
           cd ${{ matrix.service.path }}
           docker build -t ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.service.name }}:${{ github.sha }} .
-          docker push ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.service.name }}:${{ github.sha }}
 
       - name: Trivy Image Scan
         uses: aquasecurity/trivy-action@master
@@ -69,6 +75,14 @@ jobs:
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
+
+      - name: Push to ACR
+        run: |
+          az acr login --name ${{ vars.ACR_NAME }}
+          docker push ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.service.name }}:${{ github.sha }}
+          # Also tag as dev and push
+          docker tag ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.service.name }}:${{ github.sha }} ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.service.name }}:dev
+          docker push ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.service.name }}:dev
 
   deploy:
     runs-on: ubuntu-latest
@@ -81,33 +95,31 @@ jobs:
         uses: azure/login@v1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Get AKS Credentials
         run: az aks get-credentials --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} --name ${{ vars.AKS_CLUSTER_NAME }}
 
-      - name: Deploy to AKS
+      - name: Install gettext-base for envsubst
+        run: sudo apt-get update && sudo apt-get install -y gettext-base
+
+      - name: Render and Deploy to AKS
         run: |
           cd kubernetes
-          # Update Kustomize image tags
-          kustomize edit set image ${{ vars.ACR_LOGIN_SERVER }}/frontend:${{ github.sha }}
-          kustomize edit set image ${{ vars.ACR_LOGIN_SERVER }}/api-gateway-service:${{ github.sha }}
-          kustomize edit set image ${{ vars.ACR_LOGIN_SERVER }}/auth-service:${{ github.sha }}
-          kustomize edit set image ${{ vars.ACR_LOGIN_SERVER }}/github-intelligence-service:${{ github.sha }}
-          kustomize edit set image ${{ vars.ACR_LOGIN_SERVER }}/azure-intelligence-service:${{ github.sha }}
-          kustomize edit set image ${{ vars.ACR_LOGIN_SERVER }}/aws-intelligence-service:${{ github.sha }}
-          kustomize edit set image ${{ vars.ACR_LOGIN_SERVER }}/ai-rca-service:${{ github.sha }}
-          kustomize edit set image ${{ vars.ACR_LOGIN_SERVER }}/notification-service:${{ github.sha }}
-          
-          # Deploy
-          kubectl apply -k .
+          kubectl kustomize overlays/dev | envsubst > rendered.yaml
+          kubectl apply -f rendered.yaml
 
       - name: Wait for Rollout Status
         run: |
           kubectl rollout status deployment/frontend -n resolveops-dev
           kubectl rollout status deployment/api-gateway-service -n resolveops-dev
-          # Add remaining services here
+          kubectl rollout status deployment/auth-service -n resolveops-dev
+          kubectl rollout status deployment/azure-intelligence-service -n resolveops-dev
+          kubectl rollout status deployment/ai-rca-service -n resolveops-dev
+          kubectl rollout status deployment/github-intelligence-service -n resolveops-dev
+          kubectl rollout status deployment/aws-intelligence-service -n resolveops-dev
+          kubectl rollout status deployment/notification-service -n resolveops-dev
 
       - name: Print Resources
         run: |
@@ -117,10 +129,7 @@ jobs:
 
       - name: Smoke Test
         run: |
-          # Example smoke test against the internal cluster IP if accessible, or public ingress
-          # Assuming ingress is setup, wait a few seconds
           sleep 10
-          # We check the internal health endpoint via port-forward for reliability in CI
           kubectl port-forward svc/api-gateway-service 8000:8000 -n resolveops-dev &
           sleep 5
           curl -f http://localhost:8000/health || exit 1

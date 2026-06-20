@@ -1,26 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: azure-intelligence-service
-  namespace: resolveops-dev
+  name: notification-service
   labels:
-    app: azure-intelligence-service
+    app: notification-service
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: azure-intelligence-service
+      app: notification-service
   template:
     metadata:
       labels:
-        app: azure-intelligence-service
+        app: notification-service
       annotations:
         azure.workload.identity/use: "true"
     spec:
       serviceAccountName: resolveops-workload-identity-sa
       containers:
-      - name: azure-intelligence-service
-        image: ${ACR_LOGIN_SERVER}/azure-intelligence-service:${GITHUB_SHA}
+      - name: notification-service
+        image: ${ACR_LOGIN_SERVER}/notification-service:${GITHUB_SHA}
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -53,7 +52,6 @@ spec:
         - name: secrets-store-inline
           mountPath: "/mnt/secrets-store"
           readOnly: true
-
       volumes:
       - name: secrets-store-inline
         csi:
@@ -65,12 +63,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: azure-intelligence-service
-  namespace: resolveops-dev
+  name: notification-service
 spec:
   type: ClusterIP
   ports:
   - port: 8000
     targetPort: 8000
   selector:
-    app: azure-intelligence-service
+    app: notification-service

@@ -1,6 +1,6 @@
 # Workload Identity Guide
 
-This project uses Azure Workload Identity to connect to Azure services without managing static credentials.
+This project uses Azure Workload Identity to connect to Azure services without managing static credentials, and the Azure Key Vault CSI driver to securely mount secrets as files.
 
 ## Setup Flow
 
@@ -12,17 +12,32 @@ This project uses Azure Workload Identity to connect to Azure services without m
 
 To use Workload Identity in a Kubernetes Deployment:
 
-1. Specify the ServiceAccount:
+1. **ServiceAccount**: Specify the ServiceAccount created with the client-id annotation.
    ```yaml
    spec:
      serviceAccountName: resolveops-workload-identity-sa
    ```
 
-2. Add the Workload Identity label to the pod template:
+2. **Pod Labels**: Add the Workload Identity label to the pod template so the mutating webhook injects tokens.
    ```yaml
    metadata:
      labels:
        azure.workload.identity/use: "true"
    ```
 
-3. The Azure SDKs (e.g., DefaultAzureCredential in Python/Node) will automatically discover the tokens injected by the Azure Workload Identity mutating webhook and authenticate to Azure Services seamlessly.
+3. **Key Vault CSI Driver**: Services that need to read secrets from Key Vault use the `SecretProviderClass` and a Volume Mount. We maintain specific classes (like `azure-kvname-workload-identity-db` and `azure-kvname-workload-identity`) to control which secrets are injected (e.g. `db-password` is only provided to the API gateway and auth services).
+   ```yaml
+         volumeMounts:
+         - name: secrets-store-inline
+           mountPath: "/mnt/secrets-store"
+           readOnly: true
+       volumes:
+       - name: secrets-store-inline
+         csi:
+           driver: secrets-store.csi.k8s.io
+           readOnly: true
+           volumeAttributes:
+             secretProviderClass: "azure-kvname-workload-identity"
+   ```
+
+4. The Azure SDKs (e.g., DefaultAzureCredential in Python/Node) will automatically discover the tokens injected by the Azure Workload Identity mutating webhook and authenticate to Azure Services seamlessly.

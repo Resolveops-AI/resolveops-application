@@ -1,26 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ai-rca-service
-  namespace: resolveops-dev
+  name: auth-service
   labels:
-    app: ai-rca-service
+    app: auth-service
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: ai-rca-service
+      app: auth-service
   template:
     metadata:
       labels:
-        app: ai-rca-service
+        app: auth-service
       annotations:
         azure.workload.identity/use: "true"
     spec:
       serviceAccountName: resolveops-workload-identity-sa
       containers:
-      - name: ai-rca-service
-        image: ${ACR_LOGIN_SERVER}/ai-rca-service:${GITHUB_SHA}
+      - name: auth-service
+        image: ${ACR_LOGIN_SERVER}/auth-service:${GITHUB_SHA}
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -53,24 +52,22 @@ spec:
         - name: secrets-store-inline
           mountPath: "/mnt/secrets-store"
           readOnly: true
-
       volumes:
       - name: secrets-store-inline
         csi:
           driver: secrets-store.csi.k8s.io
           readOnly: true
           volumeAttributes:
-            secretProviderClass: "azure-kvname-workload-identity"
+            secretProviderClass: "azure-kvname-workload-identity-db"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ai-rca-service
-  namespace: resolveops-dev
+  name: auth-service
 spec:
   type: ClusterIP
   ports:
   - port: 8000
     targetPort: 8000
   selector:
-    app: ai-rca-service
+    app: auth-service

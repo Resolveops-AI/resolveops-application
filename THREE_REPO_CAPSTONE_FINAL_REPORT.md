@@ -17,18 +17,14 @@ The application source code was successfully migrated from the original `Sathvik
 
 **Note on unused code**: The `services/shared/` directory from the original repository was not copied, as it is composed of unused stubs not imported by any of the active services.
 
-## Kubernetes Manifests
+## Kubernetes Manifests & Environment Overlays
 
-Kubernetes manifests were successfully generated inside `resolveops-application/kubernetes/`:
-- `namespace.yaml`
-- `configmap.yaml`
-- `serviceaccount.yaml`
-- `secretproviderclass.yaml`
-- Deployment and Service definitions for all 8 microservices
-- `ingress.yaml`
-- `kustomization.yaml`
+Kubernetes manifests were successfully restructured to follow best practices:
+- **Base Manifests**: Located in `kubernetes/base/`, they define Deployment logic, probes, resource limits, and securityContexts (non-root). Services are ClusterIP only, with Ingress exclusively for frontend and API Gateway.
+- **Dev Overlay**: Located in `kubernetes/overlays/dev/`.
+- **Prod Overlay**: Located in `kubernetes/overlays/prod/`.
 
-Key Vault integration uses the `SecretProviderClass` injected via CSI driver to securely mount secrets as volumes, avoiding the need for a hardcoded `secrets.yaml`.
+Key Vault integration uses the `SecretProviderClass` injected via CSI driver to securely mount secrets as volumes, avoiding the need for a hardcoded `secrets.yaml`. We strictly segregate secret access (e.g., `db-password` is only mounted for `api-gateway-service` and `auth-service`).
 
 ## Docker Build Contexts
 
@@ -39,9 +35,10 @@ Dockerfiles are retained in each service. The build context expected for all bac
 The GitHub Action (`.github/workflows/build-deploy.yml`) is designed to:
 1. Trigger on push to `main` and manually.
 2. Run in a build matrix for all services.
-3. Perform required security scans (SonarQube, Snyk, Trivy) without bypassing errors.
-4. Build Docker images and push them to ACR using Azure OIDC.
-5. Deploy to AKS using Kustomize (`kubectl apply -k kubernetes/`), updating images dynamically to the GitHub SHA tag.
+3. Perform required security scans (SonarQube, Snyk, Trivy) strictly without bypassing errors (`continue-on-error: false`).
+4. Build Docker images and scan them with Trivy **before** pushing to ACR.
+5. Deploy to AKS using Kustomize (`kubectl kustomize kubernetes/overlays/dev | envsubst | kubectl apply -f -`), correctly replacing all placeholders dynamically.
+6. Verify deployment by checking `kubectl rollout status` for all services.
 
 ## Key Vault Secret Strategy
 
@@ -51,21 +48,14 @@ Secrets are not committed into version control. Instead, a `secretproviderclass.
 
 Azure Workload Identity eliminates the need for managing service principals and static secrets:
 - The ServiceAccount `resolveops-workload-identity-sa` is annotated with the Azure Client ID.
-- Deployments accessing Azure services (e.g., `api-gateway-service`, `azure-intelligence-service`, `ai-rca-service`) reference this ServiceAccount and use the label `azure.workload.identity/use: "true"`.
+- Deployments accessing Azure services reference this ServiceAccount and use the label `azure.workload.identity/use: "true"`.
 - Azure AD issues short-lived tokens to the pods based on the federated identity credential.
 
 ## Validation Commands
 
-Run these to verify local structure:
-```bash
-ls resolveops-application/frontend
-ls resolveops-application/services
-ls resolveops-application/kubernetes
-```
-
 Run these to verify Kubernetes manifests locally (requires `kubectl`):
 ```bash
-kubectl apply -k resolveops-application/kubernetes/ --dry-run=client
+kubectl kustomize kubernetes/overlays/dev | envsubst | kubectl apply -f - --dry-run=client
 ```
 
 After deployment to AKS, run these commands to ensure health:
@@ -78,6 +68,11 @@ kubectl get ingress -n resolveops-dev
 ## Remaining Manual Setup Steps
 
 1. Configure GitHub variables (`ACR_NAME`, `ACR_LOGIN_SERVER`, `AZURE_RESOURCE_GROUP`, `AKS_CLUSTER_NAME`, `AKS_NAMESPACE`, `WORKLOAD_IDENTITY_CLIENT_ID`, `KEY_VAULT_NAME`) and secrets (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `SONAR_TOKEN`, `SONAR_HOST_URL`, `SNYK_TOKEN`).
-2. Provision Azure Infrastructure via Terraform (this establishes the AKS cluster, ACR, Key Vault, and Managed Identity).
+2. Provision Azure Infrastructure via Terraform (this establishes the AKS cluster, ACR, Key Vault, and Managed Identity). Note: **Do not create Terraform inside this repository**, this assumes the Terraform repository is maintained separately.
 3. Populate the Azure Key Vault with the real values for secrets like `jwt-secret`.
 4. Trigger the GitHub Action to execute the first deployment.
+
+**Assumptions**:
+- This repository is dedicated to Application logic and Kubernetes Manifests. Terraform lives elsewhere.
+- Business logic was not modified.
+- Environment variables map directly from Terraform outputs.

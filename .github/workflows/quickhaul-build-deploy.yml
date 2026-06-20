@@ -2,10 +2,13 @@ name: QuickHaul Build and Deploy
 
 on:
   push:
-    branches: [ main ]
-    paths:
-      - 'quickhaul/**'
+    branches:
+      - main
   workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   build:

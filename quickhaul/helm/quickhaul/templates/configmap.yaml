@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "quickhaul.configmapName" . }}
+  labels:
+    {{- include "quickhaul.labels" . | nindent 4 }}
+data:
+  MONGO_URI: {{ .Values.config.mongoUri | quote }}
+  REDIS_URL: {{ .Values.config.redisUrl | quote }}
+  FRONTEND_URL: {{ .Values.config.frontendUrl | quote }}
+  VITE_LOCATION_API_URL: {{ .Values.config.locationApiUrl | quote }}
+  VITE_AUTH_API_URL: {{ .Values.config.authApiUrl | quote }}
+  VITE_BOOKING_API_URL: {{ .Values.config.bookingApiUrl | quote }}
+  VITE_NOTIFICATION_API_URL: {{ .Values.config.notificationApiUrl | quote }}
+  VITE_OTP_API_URL: {{ .Values.config.otpApiUrl | quote }}
+  VITE_PAYMENT_API_URL: {{ .Values.config.paymentApiUrl | quote }}

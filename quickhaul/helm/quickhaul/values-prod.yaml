@@ -1,0 +1,67 @@
+# ──────────────────────────────────────────────────────────────
+# values-prod.yaml — QuickHaul PROD overrides
+# Target namespace: quickhaul-prod
+# Slightly higher replicas, ingress TLS-ready, larger resources
+# ──────────────────────────────────────────────────────────────
+
+config:
+  mongoUri: "mongodb://quickhaul-mongodb:27017"
+  redisUrl: "redis://quickhaul-redis:6379/0"
+  frontendUrl: "https://quickhaul.example.com"
+
+mongodb:
+  persistence:
+    enabled: true
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+redis:
+  persistence:
+    enabled: true
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+frontend:
+  replicaCount: 2
+
+locationService:
+  replicaCount: 2
+
+authService:
+  replicaCount: 2
+
+bookingService:
+  replicaCount: 2
+
+notificationService:
+  replicaCount: 2
+
+otpService:
+  replicaCount: 2
+
+paymentService:
+  replicaCount: 2
+
+ingress:
+  enabled: true
+  className: "azure/application-gateway"
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    appgw.ingress.kubernetes.io/ssl-redirect: "true"
+  host: "quickhaul.example.com"
+  tls:
+    - secretName: quickhaul-tls
+      hosts:
+        - quickhaul.example.com

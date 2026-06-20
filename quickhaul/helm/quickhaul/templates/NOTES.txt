@@ -1,0 +1,47 @@
+Thank you for installing {{ .Chart.Name }} {{ .Chart.AppVersion }}!
+
+Release name : {{ .Release.Name }}
+Namespace    : {{ .Release.Namespace }}
+
+────────────────────────────────────────────────
+QuickHaul Services
+────────────────────────────────────────────────
+  frontend           : port 80
+  location_service   : port 8001
+  auth_service       : port 8002
+  booking_service    : port 8003
+  notification_service: port 8004
+  otp_service        : port 8005
+  payment_service    : port 8006
+  mongodb            : port 27017 (ClusterIP, internal only)
+  redis              : port 6379  (ClusterIP, internal only)
+
+────────────────────────────────────────────────
+Ingress
+────────────────────────────────────────────────
+{{- if .Values.ingress.enabled }}
+Ingress is ENABLED.
+  Host : {{ .Values.ingress.host }}
+  Class: {{ .Values.ingress.className }}
+{{- else }}
+Ingress is DISABLED. To access services locally use:
+
+  kubectl port-forward svc/{{ include "quickhaul.fullname" . }}-frontend 8080:80 -n {{ .Release.Namespace }}
+{{- end }}
+
+────────────────────────────────────────────────
+Secrets
+────────────────────────────────────────────────
+Before the app can run, create the required secret in the namespace:
+
+  kubectl create secret generic {{ include "quickhaul.secretName" . }} \
+    --namespace {{ .Release.Namespace }} \
+    --from-literal=JWT_SECRET='<your-jwt-secret>' \
+    --from-literal=MONGO_PASSWORD='' \
+    --from-literal=REDIS_PASSWORD=''
+
+See templates/secrets.example.yaml for the full spec.
+
+────────────────────────────────────────────────
+Monitored by ResolveOps AI (namespace: resolveops)
+────────────────────────────────────────────────

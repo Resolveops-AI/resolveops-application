@@ -1,0 +1,158 @@
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: quickhaul-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - quickhaul-network
+
+  redis:
+    image: redis:latest
+    container_name: quickhaul-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - quickhaul-network
+
+  location_service:
+    build:
+      context: ./backend
+      dockerfile: services/location_service/Dockerfile
+    image: sathvik2003/quickhaul-location:v6
+    container_name: location-service
+    ports:
+      - "8001:8001"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
+      - FRONTEND_URL=http://localhost:5173
+    env_file: .env
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - quickhaul-network
+
+  auth_service:
+    build:
+      context: ./backend
+      dockerfile: services/auth_service/Dockerfile
+    image: sathvik2003/quickhaul-auth:v6
+    container_name: auth-service
+    ports:
+      - "8002:8002"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
+      - FRONTEND_URL=http://localhost:5173
+    env_file: .env
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - quickhaul-network
+
+  booking_service:
+    build:
+      context: ./backend
+      dockerfile: services/booking_service/Dockerfile
+    image: sathvik2003/quickhaul-booking:v6
+    container_name: booking-service
+    ports:
+      - "8003:8003"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
+      - FRONTEND_URL=http://localhost:5173
+    env_file: .env
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - quickhaul-network
+
+  notification_service:
+    build:
+      context: ./backend
+      dockerfile: services/notification_service/Dockerfile
+    image: sathvik2003/quickhaul-notification:v6
+    container_name: notification-service
+    ports:
+      - "8004:8004"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
+    env_file: .env
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - quickhaul-network
+
+  otp_service:
+    build:
+      context: ./backend
+      dockerfile: services/otp_service/Dockerfile
+    image: sathvik2003/quickhaul-otp:v6
+    container_name: otp-service
+    ports:
+      - "8005:8005"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
+    env_file: .env
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - quickhaul-network
+
+  payment_service:
+    build:
+      context: ./backend
+      dockerfile: services/payment_service/Dockerfile
+    image: sathvik2003/quickhaul-payment:v6
+    container_name: payment-service
+    ports:
+      - "8006:8006"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
+    env_file: .env
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - quickhaul-network
+
+  frontend:
+    image: sathvik2003/quickhaul-frontend:v9
+    container_name: quickhaul-frontend
+    ports:
+      - "80:80"
+    environment:
+      - VITE_LOCATION_API_URL=/api/locations
+      - VITE_AUTH_API_URL=/api/auth
+      - VITE_BOOKING_API_URL=/api/bookings
+      - VITE_NOTIFICATION_API_URL=/api/notifications
+      - VITE_OTP_API_URL=/api/otp
+      - VITE_PAYMENT_API_URL=/api/payments
+    depends_on:
+      - location_service
+      - auth_service
+      - booking_service
+      - notification_service
+      - otp_service
+      - payment_service
+    networks:
+      - quickhaul-network
+
+networks:
+  quickhaul-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:

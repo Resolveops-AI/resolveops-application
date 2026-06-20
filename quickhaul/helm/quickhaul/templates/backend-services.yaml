@@ -1,0 +1,76 @@
+{{/*
+Backend microservices template.
+Each service is driven by its values block (locationService, authService, etc.).
+All services share the same ConfigMap for environment variables.
+No health probes are defined here because the upstream code does not expose
+a documented /healthz or /ready endpoint. Add probes once real endpoints exist.
+*/}}
+
+{{- $root := . -}}
+
+{{- $services := list
+  (dict "key" "locationService"     "component" "location-service"     "port" 8001)
+  (dict "key" "authService"         "component" "auth-service"         "port" 8002)
+  (dict "key" "bookingService"      "component" "booking-service"      "port" 8003)
+  (dict "key" "notificationService" "component" "notification-service" "port" 8004)
+  (dict "key" "otpService"          "component" "otp-service"          "port" 8005)
+  (dict "key" "paymentService"      "component" "payment-service"      "port" 8006)
+-}}
+
+{{- range $svc := $services -}}
+{{- $vals := index $root.Values $svc.key -}}
+{{- if $vals.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "quickhaul.fullname" $root }}-{{ $svc.component }}
+  labels:
+    {{- include "quickhaul.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $svc.component }}
+spec:
+  replicas: {{ $vals.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "quickhaul.selectorLabels" (dict "root" $root "component" $svc.component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "quickhaul.selectorLabels" (dict "root" $root "component" $svc.component) | nindent 8 }}
+    spec:
+      {{- with $root.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $svc.component }}
+          image: {{ include "quickhaul.image" (dict "registry" $root.Values.global.imageRegistry "image" $vals.image) }}
+          imagePullPolicy: {{ $vals.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "quickhaul.configmapName" $root }}
+          resources:
+            {{- toYaml $vals.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "quickhaul.fullname" $root }}-{{ $svc.component }}
+  labels:
+    {{- include "quickhaul.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $svc.component }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "quickhaul.selectorLabels" (dict "root" $root "component" $svc.component) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: http
+      protocol: TCP
+{{- end }}
+{{- end }}

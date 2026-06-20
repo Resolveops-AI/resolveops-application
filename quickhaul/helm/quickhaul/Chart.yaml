@@ -1,0 +1,16 @@
+apiVersion: v2
+name: quickhaul
+description: QuickHaul Transits — sample workload application monitored by ResolveOps AI
+type: application
+version: 0.1.0
+appVersion: "v6"
+keywords:
+  - quickhaul
+  - transits
+  - resolveops
+  - sample-workload
+home: https://github.com/Resolveops-AI/resolveops-application
+sources:
+  - https://github.com/Quick-Haul/Dockerised_Quick_Haul
+maintainers:
+  - name: ResolveOps AI Team

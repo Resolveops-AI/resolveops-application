@@ -1,0 +1,26 @@
+name: ResolveOps CI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  sonar:
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-sonar.yml@main
+    secrets: inherit
+    with:
+      project-key: ${{ vars.SONAR_PROJECT_KEY }}
+      organization: ${{ vars.SONAR_ORGANIZATION }}
+      working-directory: .
+
+  snyk:
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-snyk.yml@main
+    secrets: inherit
+    with:
+      working-directory: .

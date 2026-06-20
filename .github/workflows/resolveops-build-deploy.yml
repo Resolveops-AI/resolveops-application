@@ -1,0 +1,28 @@
+name: ResolveOps Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build.yml@main
+    secrets: inherit
+    with:
+      image-name: resolveops-frontend
+      context: ./frontend
+
+  deploy:
+    needs: build
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-kubernetes-deploy.yml@main
+    secrets: inherit
+    with:
+      namespace: ${{ vars.RESOLVEOPS_NAMESPACE }}
+      aks-name: ${{ vars.RESOLVEOPS_AKS_NAME }}
+      aks-rg: ${{ vars.RESOLVEOPS_AKS_RESOURCE_GROUP }}

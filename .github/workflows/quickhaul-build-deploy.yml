@@ -1,0 +1,43 @@
+name: QuickHaul Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build.yml@main
+    secrets: inherit
+    with:
+      image-name: quickhaul-frontend
+      context: ./quickhaul/frontend
+
+  deploy-dev:
+    needs: build
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-helm-deploy.yml@main
+    secrets: inherit
+    with:
+      namespace: ${{ vars.QUICKHAUL_DEV_NAMESPACE }}
+      aks-name: ${{ vars.QUICKHAUL_AKS_NAME }}
+      aks-rg: ${{ vars.QUICKHAUL_AKS_RESOURCE_GROUP }}
+      chart-path: ./quickhaul/helm/quickhaul
+      values-file: values-dev.yaml
+      release-name: quickhaul-dev
+
+  deploy-prod:
+    needs: deploy-dev
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-helm-deploy.yml@main
+    secrets: inherit
+    with:
+      namespace: ${{ vars.QUICKHAUL_PROD_NAMESPACE }}
+      aks-name: ${{ vars.QUICKHAUL_AKS_NAME }}
+      aks-rg: ${{ vars.QUICKHAUL_AKS_RESOURCE_GROUP }}
+      chart-path: ./quickhaul/helm/quickhaul
+      values-file: values-prod.yaml
+      release-name: quickhaul-prod

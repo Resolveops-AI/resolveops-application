@@ -2,10 +2,12 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: resolveops-ingress
+  namespace: resolveops
 spec:
-  ingressClassName: nginx
+  ingressClassName: azure/application-gateway
   rules:
-  - http:
+  - host: resolveops-ai.sathvikdevops.online
+    http:
       paths:
       - path: /api
         pathType: Prefix

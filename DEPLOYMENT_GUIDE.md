@@ -1,57 +1,80 @@
-# Deployment Guide
+# Final Application Deployment Runbook
 
-This guide details how to deploy the ResolveOps application to Azure Kubernetes Service (AKS) using environment-based Kustomize overlays.
+This runbook outlines the steps and validation checks to deploy and verify the ResolveOps AI and QuickHaul applications on the shared AKS cluster tonight.
 
-## Prerequisites
+---
 
-- Active AKS Cluster
-- Azure Container Registry (ACR)
-- Azure Key Vault with Secrets Configured
-- GitHub repository secrets and variables configured
+## Architectural Guardrails & Final Decisions
+* **No RabbitMQ**: RabbitMQ is completely removed/disabled as an active component.
+* **No Kong**: Kong Gateway/Ingress is not used.
+* **Ingress Integration**: Public ingress is routed exclusively via **Application Gateway WAF + AGIC Ingress**.
+* **ACR Registry**: Container images are hosted on a public/accessible Azure Container Registry (ACR).
+* **One Shared AKS Cluster**: Both applications run on the shared cluster `resolveops-aks-01`.
+* **Database Setup**:
+  * **ResolveOps AI**: Uses Azure PostgreSQL. The connection string (`DATABASE_URL`) is retrieved from Key Vault secret `database-url` synced to the cluster.
+  * **QuickHaul**: Uses an in-cluster MongoDB pod with Persistent Volume claims (PVC size `2Gi` for dev, `5Gi` for prod) using the `managed-csi` StorageClass.
+* **Reliability & Security**:
+  * All workloads run as **non-root** users (ResolveOps uses UID/GID 10001, QuickHaul backend services use 10001, QuickHaul frontend runs Nginx on port 8080 under UID 101, MongoDB runs under UID 999).
+  * Workloads include liveness/readiness probes, CPU/memory requests/limits, HorizontalPodAutoscalers (HPA), and NetworkPolicies.
 
-## GitHub Actions Variables and Secrets
+---
 
-The primary deployment mechanism is the `build-deploy.yml` workflow.
+## ResolveOps AI Deployment & Verification
 
-### Required GitHub Secrets:
-- `AZURE_CLIENT_ID`: The Client ID for OIDC federation.
-- `AZURE_TENANT_ID`: The Tenant ID of the Azure AD. (can also be a variable).
-- `AZURE_SUBSCRIPTION_ID`: Azure Subscription ID.
-- `SONAR_TOKEN`, `SONAR_HOST_URL`: For SonarQube static analysis.
-- `SNYK_TOKEN`: For Snyk dependency scanning.
-
-### Required GitHub Variables:
-- `ACR_NAME`: e.g., `myacr`
-- `ACR_LOGIN_SERVER`: e.g., `myacr.azurecr.io`
-- `AZURE_RESOURCE_GROUP`: e.g., `rg-resolveops`
-- `AKS_CLUSTER_NAME`: e.g., `aks-resolveops`
-- `AKS_NAMESPACE`: (Default: `resolveops-dev`)
-- `WORKLOAD_IDENTITY_CLIENT_ID`: Used in Kustomize manifests.
-- `KEY_VAULT_NAME`: Used in SecretProviderClass.
-- `AZURE_TENANT_ID`: Used in SecretProviderClass.
-
-### Mapping from Terraform Outputs:
-The Terraform infrastructure repository outputs these exact values. Map the Terraform outputs directly to the corresponding GitHub Secret or Variable.
-
-## Private AKS Note
-
-**IMPORTANT**: If your AKS cluster is deployed as a Private Cluster, the GitHub Actions workflow will fail to reach the Kubernetes API. You must run the deployment workflow on a self-hosted GitHub runner deployed inside the AKS VNet.
-
-## Validation Commands
-
-To validate the Kustomize rendering locally:
+Deploy the base Kustomize configuration:
 ```bash
-kubectl kustomize kubernetes/overlays/dev
+# Apply ResolveOps base configuration
+kubectl apply -k kubernetes/base
 ```
 
-To dry-run against the cluster (requires AKS credentials):
+### Verification Checks:
 ```bash
-kubectl kustomize kubernetes/overlays/dev | envsubst | kubectl apply -f - --dry-run=client
+# Check ResolveOps Pod Statuses
+kubectl get pods -n resolveops
+
+# Check ResolveOps Ingress Configuration
+kubectl get ingress -n resolveops
+
+# Check API Gateway logs for connectivity / start messages
+kubectl logs deploy/api-gateway-service -n resolveops --tail=100
 ```
 
-To verify the deployment in the cluster:
+---
+
+## QuickHaul Helm Deployment
+
+Install/Upgrade QuickHaul in both the `dev` and `prod` namespaces:
+
+### 1. Deploy Dev Environment:
 ```bash
-kubectl get pods -n resolveops-dev
-kubectl get svc -n resolveops-dev
-kubectl get ingress -n resolveops-dev
+helm upgrade --install quickhaul-dev quickhaul/helm/quickhaul \
+  -n quickhaul-dev \
+  -f quickhaul/helm/quickhaul/values-dev.yaml \
+  --create-namespace
+```
+
+### 2. Deploy Prod Environment:
+```bash
+helm upgrade --install quickhaul-prod quickhaul/helm/quickhaul \
+  -n quickhaul-prod \
+  -f quickhaul/helm/quickhaul/values-prod.yaml \
+  --create-namespace
+```
+
+### Verification Checks:
+```bash
+# Verify QuickHaul dev pods
+kubectl get pods -n quickhaul-dev
+
+# Verify QuickHaul prod pods
+kubectl get pods -n quickhaul-prod
+
+# Verify PVC creation and status for MongoDB dev
+kubectl get pvc -n quickhaul-dev
+
+# Verify PVC creation and status for MongoDB prod
+kubectl get pvc -n quickhaul-prod
+
+# Verify all HPAs across namespaces
+kubectl get hpa -A
 ```

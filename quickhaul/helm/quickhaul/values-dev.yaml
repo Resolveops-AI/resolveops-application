@@ -7,7 +7,7 @@
 config:
   mongoUri: "mongodb://quickhaul-mongodb:27017"
   redisUrl: "redis://quickhaul-redis:6379/0"
-  frontendUrl: "http://quickhaul-dev.example.com"
+  frontendUrl: "http://quickhaul.sathvikdevops.site"
 
 mongodb:
   persistence:
@@ -47,9 +47,8 @@ paymentService:
   replicaCount: 1
 
 ingress:
+  enabled: false
+
+gatewayAPI:
   enabled: true
-  className: "nginx"
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-  host: "quickhaul-dev.example.com"
-  tls: []
+  host: "quickhaul.sathvikdevops.site"

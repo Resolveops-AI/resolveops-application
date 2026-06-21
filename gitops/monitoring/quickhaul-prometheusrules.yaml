@@ -1,0 +1,81 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: quickhaul-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+  - name: quickhaul-kubernetes-alerts
+    rules:
+    - alert: QuickHaulCrashLoopBackOff
+      expr: kube_pod_container_status_waiting_reason{namespace=~"quickhaul-dev|quickhaul-prod", reason="CrashLoopBackOff"} > 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Pod CrashLoopBackOff in QuickHaul namespace"
+        description: "Pod {{ $labels.pod }} is in CrashLoopBackOff state."
+    
+    - alert: QuickHaulFrequentPodRestarts
+      expr: rate(kube_pod_container_status_restarts_total{namespace=~"quickhaul-dev|quickhaul-prod"}[15m]) * 60 * 15 > 5
+      labels:
+        severity: warning
+      annotations:
+        summary: "Frequent pod restarts in QuickHaul"
+        description: "Pod {{ $labels.pod }} is restarting frequently."
+
+    - alert: QuickHaulDeploymentUnavailable
+      expr: kube_deployment_status_replicas_unavailable{namespace=~"quickhaul-dev|quickhaul-prod"} > 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "QuickHaul Deployment Unavailable"
+        description: "Deployment {{ $labels.deployment }} has unavailable replicas."
+
+    - alert: QuickHaulPodNotReady
+      expr: kube_pod_status_ready{namespace=~"quickhaul-dev|quickhaul-prod", condition="true"} == 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "QuickHaul Pod not ready"
+        description: "Pod {{ $labels.pod }} is not ready."
+
+    - alert: QuickHaulHighCPU
+      expr: sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{namespace=~"quickhaul-dev|quickhaul-prod"}) by (pod) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage in QuickHaul pod"
+        description: "Pod {{ $labels.pod }} CPU usage is high."
+
+    - alert: QuickHaulHighMemory
+      expr: sum(container_memory_working_set_bytes{namespace=~"quickhaul-dev|quickhaul-prod"}) by (pod) > 500000000
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High Memory usage in QuickHaul pod"
+        description: "Pod {{ $labels.pod }} Memory usage is high."
+
+    - alert: QuickHaulMongoDbUnavailable
+      expr: kube_deployment_status_replicas_unavailable{namespace=~"quickhaul-dev|quickhaul-prod", deployment=~".*mongodb.*"} > 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "QuickHaul MongoDB Unavailable"
+        description: "MongoDB deployment {{ $labels.deployment }} is unavailable."
+
+    - alert: QuickHaulRedisUnavailable
+      expr: kube_deployment_status_replicas_unavailable{namespace=~"quickhaul-dev|quickhaul-prod", deployment=~".*redis.*"} > 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "QuickHaul Redis Unavailable"
+        description: "Redis deployment {{ $labels.deployment }} is unavailable."

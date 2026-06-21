@@ -210,3 +210,9 @@ ingress:
 serviceAccount:
   create: false
   name: ""
+
+# ── Gateway API ───────────────────────────────────────────────
+gatewayAPI:
+  enabled: false
+  className: "kong"
+  host: ""

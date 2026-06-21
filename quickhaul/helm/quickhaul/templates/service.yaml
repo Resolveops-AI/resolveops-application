@@ -1,0 +1,52 @@
+{{- $root := . -}}
+
+{{- if .Values.frontend.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "quickhaul.fullname" . }}-frontend
+  labels:
+    {{- include "quickhaul.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "quickhaul.selectorLabels" (dict "root" . "component" "frontend") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+{{- end }}
+
+{{- $services := list
+  (dict "key" "locationService"     "component" "location-service"     "port" 8001)
+  (dict "key" "authService"         "component" "auth-service"         "port" 8002)
+  (dict "key" "bookingService"      "component" "booking-service"      "port" 8003)
+  (dict "key" "notificationService" "component" "notification-service" "port" 8004)
+  (dict "key" "otpService"          "component" "otp-service"          "port" 8005)
+  (dict "key" "paymentService"      "component" "payment-service"      "port" 8006)
+-}}
+
+{{- range $svc := $services -}}
+{{- $vals := index $root.Values $svc.key -}}
+{{- if $vals.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "quickhaul.fullname" $root }}-{{ $svc.component }}
+  labels:
+    {{- include "quickhaul.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $svc.component }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "quickhaul.selectorLabels" (dict "root" $root "component" $svc.component) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: {{ $svc.port }}
+      protocol: TCP
+{{- end }}
+{{- end }}

@@ -1,0 +1,130 @@
+{{- $root := . -}}
+
+{{- if .Values.frontend.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "quickhaul.fullname" . }}-frontend
+  labels:
+    {{- include "quickhaul.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "quickhaul.selectorLabels" (dict "root" . "component" "frontend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "quickhaul.selectorLabels" (dict "root" . "component" "frontend") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "quickhaul.fullname" . }}
+      securityContext:
+        fsGroup: 101
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: frontend
+          image: {{ include "quickhaul.image" (dict "registry" .Values.global.imageRegistry "image" .Values.frontend.image) }}
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "quickhaul.configmapName" . }}
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+{{- end }}
+
+{{- $services := list
+  (dict "key" "locationService"     "component" "location-service"     "port" 8001)
+  (dict "key" "authService"         "component" "auth-service"         "port" 8002)
+  (dict "key" "bookingService"      "component" "booking-service"      "port" 8003)
+  (dict "key" "notificationService" "component" "notification-service" "port" 8004)
+  (dict "key" "otpService"          "component" "otp-service"          "port" 8005)
+  (dict "key" "paymentService"      "component" "payment-service"      "port" 8006)
+-}}
+
+{{- range $svc := $services -}}
+{{- $vals := index $root.Values $svc.key -}}
+{{- if $vals.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "quickhaul.fullname" $root }}-{{ $svc.component }}
+  labels:
+    {{- include "quickhaul.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $svc.component }}
+spec:
+  replicas: {{ $vals.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "quickhaul.selectorLabels" (dict "root" $root "component" $svc.component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "quickhaul.selectorLabels" (dict "root" $root "component" $svc.component) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "quickhaul.fullname" $root }}
+      securityContext:
+        fsGroup: 10001
+      {{- with $root.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $svc.component }}
+          image: {{ include "quickhaul.image" (dict "registry" $root.Values.global.imageRegistry "image" $vals.image) }}
+          imagePullPolicy: {{ $vals.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "quickhaul.configmapName" $root }}
+          resources:
+            {{- toYaml $vals.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            tcpSocket:
+              port: {{ $svc.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: {{ $svc.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+{{- end }}
+{{- end }}

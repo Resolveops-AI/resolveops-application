@@ -1,0 +1,44 @@
+{{- $root := . -}}
+
+{{- if .Values.frontend.enabled -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "quickhaul.fullname" . }}-frontend-pdb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "quickhaul.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "quickhaul.selectorLabels" (dict "root" . "component" "frontend") | nindent 6 }}
+{{- end }}
+
+{{- $services := list
+  (dict "key" "locationService"     "component" "location-service")
+  (dict "key" "authService"         "component" "auth-service")
+  (dict "key" "bookingService"      "component" "booking-service")
+  (dict "key" "notificationService" "component" "notification-service")
+  (dict "key" "otpService"          "component" "otp-service")
+  (dict "key" "paymentService"      "component" "payment-service")
+-}}
+
+{{- range $svc := $services -}}
+{{- $vals := index $root.Values $svc.key -}}
+{{- if $vals.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "quickhaul.fullname" $root }}-{{ $svc.component }}-pdb
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "quickhaul.labels" $root | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "quickhaul.selectorLabels" (dict "root" $root "component" $svc.component) | nindent 6 }}
+{{- end }}
+{{- end }}

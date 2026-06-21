@@ -1,21 +1,25 @@
 {{- if .Values.mongodb.enabled -}}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
-  name: {{ include "quickhaul.fullname" . }}-mongodb
+  name: quickhaul-mongodb
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "quickhaul.labels" . | nindent 4 }}
     app.kubernetes.io/component: mongodb
 spec:
+  serviceName: quickhaul-mongodb
   replicas: {{ .Values.mongodb.replicaCount }}
   selector:
     matchLabels:
-      {{- include "quickhaul.selectorLabels" (dict "root" . "component" "mongodb") | nindent 6 }}
+      app: quickhaul-mongodb
   template:
     metadata:
       labels:
-        {{- include "quickhaul.selectorLabels" (dict "root" . "component" "mongodb") | nindent 8 }}
+        app: quickhaul-mongodb
     spec:
+      securityContext:
+        fsGroup: 999
       containers:
         - name: mongodb
           image: {{ include "quickhaul.image" (dict "registry" .Values.global.imageRegistry "image" .Values.mongodb.image) }}
@@ -26,51 +30,85 @@ spec:
               protocol: TCP
           resources:
             {{- toYaml .Values.mongodb.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.mongodb.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.mongodb.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
           volumeMounts:
             - name: data
               mountPath: /data/db
-      volumes:
-        - name: data
-          {{- if .Values.mongodb.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: {{ include "quickhaul.fullname" . }}-mongodb
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.mongodb.persistence.size }}
+        {{- if .Values.mongodb.persistence.storageClass }}
+        storageClassName: {{ .Values.mongodb.persistence.storageClass }}
+        {{- else }}
+        storageClassName: "managed-csi"
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "quickhaul.mongoHost" . }}
+  name: quickhaul-mongodb
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "quickhaul.labels" . | nindent 4 }}
     app.kubernetes.io/component: mongodb
 spec:
   type: ClusterIP
   selector:
-    {{- include "quickhaul.selectorLabels" (dict "root" . "component" "mongodb") | nindent 4 }}
+    app: quickhaul-mongodb
   ports:
     - name: mongo
       port: {{ .Values.mongodb.port }}
-      targetPort: mongo
+      targetPort: {{ .Values.mongodb.port }}
       protocol: TCP
-{{- if .Values.mongodb.persistence.enabled }}
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
 metadata:
-  name: {{ include "quickhaul.fullname" . }}-mongodb
-  labels:
-    {{- include "quickhaul.labels" . | nindent 4 }}
-    app.kubernetes.io/component: mongodb
+  name: mongodb-network-policy
+  namespace: {{ .Release.Namespace }}
 spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: {{ .Values.mongodb.persistence.size }}
-  {{- if .Values.mongodb.persistence.storageClass }}
-  storageClassName: {{ .Values.mongodb.persistence.storageClass }}
-  {{- end }}
-{{- end }}
+  podSelector:
+    matchLabels:
+      app: quickhaul-mongodb
+  ingress:
+  - from:
+    - podSelector:
+        matchExpressions:
+        - key: app.kubernetes.io/component
+          operator: In
+          values:
+          - location-service
+          - auth-service
+          - booking-service
+          - notification-service
+          - otp-service
+          - payment-service
+    ports:
+    - protocol: TCP
+      port: {{ .Values.mongodb.port }}
+  policyTypes:
+  - Ingress
 {{- end }}

@@ -47,8 +47,10 @@ paymentService:
   replicaCount: 1
 
 ingress:
-  enabled: false
+  enabled: true
+  className: "azure/application-gateway"
+  host: "dev.quickhaul.sathvikdevops.site"
 
 gatewayAPI:
-  enabled: true
-  host: "quickhaul.sathvikdevops.site"
+  enabled: false
+  host: ""

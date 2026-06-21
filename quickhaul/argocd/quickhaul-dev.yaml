@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/Resolveops-AI/resolveops-application.git
     targetRevision: main
-    path: sample-apps/quickhaul/helm/quickhaul
+    path: quickhaul/helm/quickhaul
     helm:
       valueFiles:
       - values-dev.yaml

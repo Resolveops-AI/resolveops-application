@@ -17,4 +17,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all backend code
-COPY . .
+RUN groupadd -g 10001 appuser && useradd -u 10001 -g appuser -m -s /bin/bash appuser
+COPY --chown=appuser:appuser . .
+USER 10001
+

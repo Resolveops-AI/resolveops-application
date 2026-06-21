@@ -14,8 +14,8 @@ COPY services/payment_service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the service and shared code
-COPY services/payment_service/ ./services/payment_service/
-COPY shared/ ./shared/
-
-# Use uvicorn to run the service from the root to handle shared imports correctly
+RUN groupadd -g 10001 appuser && useradd -u 10001 -g appuser -m -s /bin/bash appuser
+COPY --chown=appuser:appuser services/payment_service/ ./services/payment_service/
+COPY --chown=appuser:appuser shared/ ./shared/
+USER 10001
 CMD ["uvicorn", "services.payment_service.main:app", "--host", "0.0.0.0", "--port", "8006"]

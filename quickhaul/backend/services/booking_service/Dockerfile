@@ -12,8 +12,9 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY services/booking_service/ ./services/booking_service/
-COPY shared/ ./shared/
-COPY data/ ./data/
-
+RUN groupadd -g 10001 appuser && useradd -u 10001 -g appuser -m -s /bin/bash appuser
+COPY --chown=appuser:appuser services/booking_service/ ./services/booking_service/
+COPY --chown=appuser:appuser shared/ ./shared/
+COPY --chown=appuser:appuser data/ ./data/
+USER 10001
 CMD ["uvicorn", "services.booking_service.app:app", "--host", "0.0.0.0", "--port", "8003"]

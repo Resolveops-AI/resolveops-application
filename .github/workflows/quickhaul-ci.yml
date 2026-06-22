@@ -1,7 +1,13 @@
 name: QuickHaul CI
 
 on:
-
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'quickhaul/**'
+      - '.github/workflows/quickhaul-ci.yml'
   push:
     branches:
       - main
@@ -33,7 +39,12 @@ jobs:
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "dev_image_tag=dev-pr-${{ github.event.pull_request.number }}-$SHORT_SHA" >> $GITHUB_OUTPUT
+          else
+            echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
+          fi
 
   security-scan:
     uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
@@ -52,7 +63,49 @@ jobs:
       - name: Helm Template Prod
         run: helm template quickhaul-prod quickhaul/helm/quickhaul -n quickhaul-prod -f quickhaul/helm/quickhaul/values-prod.yaml
 
+  # ==========================================
+  # PR FLOW (DEV IMAGES)
+  # ==========================================
+  build-dev-images:
+    if: github.event_name == 'pull_request'
+    needs: [setup, security-scan, helm-validation]
+    strategy:
+      matrix:
+        service: [frontend, location, auth, booking, notification, otp, payment]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
+    secrets: inherit
+    with:
+      image-name: quickhaul-${{ matrix.service }}
+      context-path: ${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
+      acr-login-server: resolveopsacr03.azurecr.io
+      image-tag: ${{ needs.setup.outputs.dev_image_tag }}
 
+  update-dev-helm:
+    if: github.event_name == 'pull_request'
+    needs: [setup, build-dev-images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Update values-dev.yaml tags
+        run: |
+          NEW_TAG="${{ needs.setup.outputs.dev_image_tag }}"
+          # Replace any 'tag: <anything>' under images
+          sed -i "s/tag: .*/tag: $NEW_TAG/g" quickhaul/helm/quickhaul/values-dev.yaml
+          
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add quickhaul/helm/quickhaul/values-dev.yaml
+          git commit -m "chore: update quickhaul dev image tag [skip ci]" || echo "No changes to commit"
+          git push origin ${{ github.head_ref }}
+
+  # ==========================================
+  # MAIN FLOW (PROD IMAGES)
+  # ==========================================
   build-candidate-images:
     if: github.event_name == 'push'
     needs: [setup, security-scan, helm-validation]
@@ -168,6 +221,18 @@ jobs:
   notify-helm-validation:
     needs: [helm-validation]
     if: ${{ always() && needs.helm-validation.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+
+  notify-build-dev-images:
+    needs: [build-dev-images]
+    if: ${{ always() && needs.build-dev-images.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+
+  notify-update-dev-helm:
+    needs: [update-dev-helm]
+    if: ${{ always() && needs.update-dev-helm.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     secrets: inherit
 

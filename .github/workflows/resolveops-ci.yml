@@ -1,7 +1,13 @@
 name: ResolveOps AI CI
 
 on:
-
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'resolveops-ai/**'
+      - '.github/workflows/resolveops-ci.yml'
   push:
     branches:
       - main
@@ -32,7 +38,12 @@ jobs:
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "dev_image_tag=resolveops-pr-${{ github.event.pull_request.number }}-$SHORT_SHA" >> $GITHUB_OUTPUT
+          else
+            echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
+          fi
 
   security-scan:
     uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
@@ -40,7 +51,23 @@ jobs:
     with:
       working_directory: .
 
+  # ==========================================
+  # PR FLOW (DEV IMAGES)
+  # ==========================================
+  build-dev-images:
+    if: github.event_name == 'pull_request'
+    needs: [setup, security-scan]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
+    secrets: inherit
+    with:
+      image-name: resolveops-ai
+      context-path: ./resolveops-ai
+      acr-login-server: resolveopsacr03.azurecr.io
+      image-tag: ${{ needs.setup.outputs.dev_image_tag }}
 
+  # ==========================================
+  # MAIN FLOW (PROD IMAGES)
+  # ==========================================
   build-candidate-images:
     if: github.event_name == 'push'
     needs: [setup, security-scan]
@@ -132,6 +159,12 @@ jobs:
   notify-security-scan:
     needs: [security-scan]
     if: ${{ always() && needs.security-scan.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+
+  notify-build-dev-images:
+    needs: [build-dev-images]
+    if: ${{ always() && needs.build-dev-images.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     secrets: inherit
 

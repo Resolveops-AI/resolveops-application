@@ -35,19 +35,13 @@ jobs:
     outputs:
       short_sha: ${{ steps.vars.outputs.short_sha }}
       dev_image_tag: ${{ steps.vars.outputs.dev_image_tag }}
-      candidate_tag: ${{ steps.vars.outputs.candidate_tag }}
     steps:
       - name: Calculate Variables
         id: vars
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "dev_image_tag=dev-pr-${{ github.event.pull_request.number }}-$SHORT_SHA" >> $GITHUB_OUTPUT
-          else
-            echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
-          fi
+          echo "dev_image_tag=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
 
   lint-testing:
     runs-on: ubuntu-latest
@@ -107,10 +101,10 @@ jobs:
         run: helm template quickhaul-prod quickhaul/helm/quickhaul -n quickhaul-prod -f quickhaul/helm/quickhaul/values-prod.yaml
 
   # ==========================================
-  # PR FLOW (DEV IMAGES)
+  # DEV PUSH FLOW (DEV IMAGES)
   # ==========================================
   build-dev-images:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     needs: [setup, sast-snyk-scan, helm-validation]
     strategy:
       matrix:
@@ -126,16 +120,15 @@ jobs:
       image_tag: ${{ needs.setup.outputs.dev_image_tag }}
 
   update-values-dev-yaml:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     needs: [setup, build-dev-images]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: dev
       - name: Update values-dev.yaml tags
         run: |
           NEW_TAG="${{ needs.setup.outputs.dev_image_tag }}"
@@ -145,7 +138,7 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add quickhaul/helm/quickhaul/values-dev.yaml
           git commit -m "chore: update quickhaul dev image tag [skip ci]" || echo "No changes to commit"
-          git push origin ${{ github.head_ref }}
+          git push origin dev
 
   # ==========================================
   # MAIN FLOW (PROD IMAGES)
@@ -169,27 +162,14 @@ jobs:
           default_bump: patch
           release_branches: main
 
-  build-prod-candidate-images:
+  verify-and-prepare-prod:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [setup, calculate-semver]
-    strategy:
-      matrix:
-        service: [frontend, location, auth, booking, notification, otp, payment]
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
-    secrets: inherit
-    with:
-      image_name: quickhaul-${{ matrix.service }}
-      context_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
-      dockerfile_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend/Dockerfile' || './quickhaul/backend/Dockerfile' }}
-      acr_name: resolveopsacr03
-      acr_login_server: resolveopsacr03.azurecr.io
-      image_tag: ${{ needs.setup.outputs.candidate_tag }}
-
-  verify-tag-not-exists:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [calculate-semver, build-prod-candidate-images]
+    needs: [calculate-semver]
     runs-on: ubuntu-latest
+    outputs:
+      dev_tag: ${{ steps.get_tag.outputs.dev_tag }}
     steps:
+      - uses: actions/checkout@v4
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -204,10 +184,44 @@ jobs:
             echo "Error: Tag $TAG already exists in ACR!"
             exit 1
           fi
+      - name: Get Dev Tag
+        id: get_tag
+        run: |
+          DEV_TAG=$(grep 'tag:' quickhaul/helm/quickhaul/values-dev.yaml | head -n 1 | awk '{print $2}' | tr -d '"')
+          echo "dev_tag=$DEV_TAG" >> $GITHUB_OUTPUT
+
+  prod-trivy-scan:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [verify-and-prepare-prod]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [frontend, location, auth, booking, notification, otp, payment]
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Log in to Azure Container Registry
+        run: az acr login --name resolveopsacr03
+      - name: Pull Dev Image
+        run: |
+          docker pull resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.verify-and-prepare-prod.outputs.dev_tag }}
+      - name: Run Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.verify-and-prepare-prod.outputs.dev_tag }}"
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
 
   prod-approval-gate:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [verify-tag-not-exists]
+    needs: [prod-trivy-scan]
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -215,7 +229,7 @@ jobs:
 
   retag-and-push-prod-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [setup, calculate-semver, prod-approval-gate]
+    needs: [calculate-semver, verify-and-prepare-prod, prod-approval-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -229,15 +243,13 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: Retag and Push Images
         run: |
-          CANDIDATE="${{ needs.setup.outputs.candidate_tag }}"
+          DEV_TAG="${{ needs.verify-and-prepare-prod.outputs.dev_tag }}"
           VERSION="${{ needs.calculate-semver.outputs.new_version }}"
           SERVICES=("frontend" "location" "auth" "booking" "notification" "otp" "payment")
           
           for SERVICE in "${SERVICES[@]}"; do
-            echo "Retagging quickhaul-$SERVICE from $CANDIDATE to $VERSION..."
-            az acr import --name resolveopsacr03 \
-              --source resolveopsacr03.azurecr.io/quickhaul-$SERVICE:$CANDIDATE \
-              --image quickhaul-$SERVICE:$VERSION
+            echo "Retagging quickhaul-$SERVICE from $DEV_TAG to $VERSION..."
+            az acr import --name resolveopsacr03               --source resolveopsacr03.azurecr.io/quickhaul-$SERVICE:$DEV_TAG               --image quickhaul-$SERVICE:$VERSION
           done
 
   update-values-prod-yaml:
@@ -349,30 +361,14 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-calculate-semver-failed:
-    needs: [calculate-semver]
-    if: ${{ always() && needs.calculate-semver.result == 'failure' }}
+  notify-prod-trivy-scan-failed:
+    needs: [prod-trivy-scan]
+    if: ${{ always() && needs.prod-trivy-scan.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "QuickHaul"
       environment: "CI/CD"
-      failed_job_name: "calculate-semver"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-    secrets: inherit
-
-  notify-build-prod-candidate-failed:
-    needs: [build-prod-candidate-images]
-    if: ${{ always() && needs.build-prod-candidate-images.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    with:
-      service_name: "QuickHaul"
-      environment: "CI/CD"
-      failed_job_name: "build-prod-candidate-images"
+      failed_job_name: "prod-trivy-scan"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"

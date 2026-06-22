@@ -81,15 +81,28 @@ jobs:
             echo "Warning: No python tests found"
           fi
 
-  sast-snyk-scan:
+  sast-sonar-scan:
     needs: [lint-testing]
     uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
     secrets: inherit
     with:
       working_directory: .
+      run_sonar: true
+      run_snyk: false
+      run_trivy: false
+
+  sca-snyk-scan:
+    needs: [sast-sonar-scan]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
+    secrets: inherit
+    with:
+      working_directory: .
+      run_sonar: false
+      run_snyk: true
+      run_trivy: false
 
   helm-validation:
-    needs: [lint-testing]
+    needs: [sca-snyk-scan]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -101,27 +114,48 @@ jobs:
         run: helm template quickhaul-prod quickhaul/helm/quickhaul -n quickhaul-prod -f quickhaul/helm/quickhaul/values-prod.yaml
 
   # ==========================================
-  # DEV PUSH FLOW (DEV IMAGES)
+  # DEV PUSH FLOW
   # ==========================================
-  build-dev-images:
+  build-scan-push:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [setup, sast-snyk-scan, helm-validation]
+    needs: [setup, helm-validation]
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         service: [frontend, location, auth, booking, notification, otp, payment]
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
-    secrets: inherit
-    with:
-      image_name: quickhaul-${{ matrix.service }}
-      context_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
-      dockerfile_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend/Dockerfile' || './quickhaul/backend/Dockerfile' }}
-      acr_name: resolveopsacr03
-      acr_login_server: resolveopsacr03.azurecr.io
-      image_tag: ${{ needs.setup.outputs.dev_image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Log in to ACR
+        run: az acr login --name resolveopsacr03
+      - name: docker build
+        run: |
+          CONTEXT_PATH=${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
+          DOCKERFILE_PATH=${{ matrix.service == 'frontend' && './quickhaul/frontend/Dockerfile' || './quickhaul/backend/Dockerfile' }}
+          IMAGE_URI="resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.setup.outputs.dev_image_tag }}"
+          
+          docker build -t $IMAGE_URI -f $DOCKERFILE_PATH $CONTEXT_PATH
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.setup.outputs.dev_image_tag }}"
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
+      - name: docker push only if Trivy passes
+        run: |
+          docker push resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.setup.outputs.dev_image_tag }}
 
-  update-values-dev-yaml:
+  helm-values-update:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [setup, build-dev-images]
+    needs: [setup, build-scan-push]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -141,14 +175,15 @@ jobs:
           git push origin dev
 
   # ==========================================
-  # MAIN FLOW (PROD IMAGES)
+  # MAIN PUSH FLOW
   # ==========================================
-  calculate-semver:
+  prepare-prod-promotion:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [sast-snyk-scan, helm-validation]
+    needs: [helm-validation]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.semver.outputs.new_tag }}
+      dev_tag: ${{ steps.get_tag.outputs.dev_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -161,15 +196,6 @@ jobs:
           dry_run: true
           default_bump: patch
           release_branches: main
-
-  verify-and-prepare-prod:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [calculate-semver]
-    runs-on: ubuntu-latest
-    outputs:
-      dev_tag: ${{ steps.get_tag.outputs.dev_tag }}
-    steps:
-      - uses: actions/checkout@v4
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -178,7 +204,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: Check ACR for Tag
         run: |
-          TAG="${{ needs.calculate-semver.outputs.new_version }}"
+          TAG="${{ steps.semver.outputs.new_tag }}"
           EXISTS=$(az acr repository show-tags -n resolveopsacr03 --repository quickhaul-frontend --query "[?@ == '$TAG']" -o tsv)
           if [ -n "$EXISTS" ]; then
             echo "Error: Tag $TAG already exists in ACR!"
@@ -192,7 +218,7 @@ jobs:
 
   prod-trivy-scan:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [verify-and-prepare-prod]
+    needs: [prepare-prod-promotion]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -208,63 +234,48 @@ jobs:
         run: az acr login --name resolveopsacr03
       - name: Pull Dev Image
         run: |
-          docker pull resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.verify-and-prepare-prod.outputs.dev_tag }}
-      - name: Run Trivy Scan
+          docker pull resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.prepare-prod-promotion.outputs.dev_tag }}
+      - name: Trivy Scan again
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: "resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.verify-and-prepare-prod.outputs.dev_tag }}"
+          image-ref: "resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.prepare-prod-promotion.outputs.dev_tag }}"
           format: "table"
           exit-code: "1"
           ignore-unfixed: true
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
 
-  prod-approval-gate:
+  promote-to-prod:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [prod-trivy-scan]
+    needs: [prepare-prod-promotion, prod-trivy-scan]
     runs-on: ubuntu-latest
     environment: production
-    steps:
-      - run: echo "Production environment approved!"
-
-  retag-and-push-prod-images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [calculate-semver, verify-and-prepare-prod, prod-approval-gate]
-    runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Azure Login
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Retag and Push Images
+      - name: Retag Dev Image as vX.Y.Z and Push to ACR
         run: |
-          DEV_TAG="${{ needs.verify-and-prepare-prod.outputs.dev_tag }}"
-          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          DEV_TAG="${{ needs.prepare-prod-promotion.outputs.dev_tag }}"
+          VERSION="${{ needs.prepare-prod-promotion.outputs.new_version }}"
           SERVICES=("frontend" "location" "auth" "booking" "notification" "otp" "payment")
           
           for SERVICE in "${SERVICES[@]}"; do
             echo "Retagging quickhaul-$SERVICE from $DEV_TAG to $VERSION..."
             az acr import --name resolveopsacr03               --source resolveopsacr03.azurecr.io/quickhaul-$SERVICE:$DEV_TAG               --image quickhaul-$SERVICE:$VERSION
           done
-
-  update-values-prod-yaml:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [calculate-semver, retag-and-push-prod-images]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
       - name: Update values-prod.yaml
         run: |
-          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          VERSION="${{ needs.prepare-prod-promotion.outputs.new_version }}"
           sed -i "s/tag: .*/tag: $VERSION/g" quickhaul/helm/quickhaul/values-prod.yaml
           
           git config --global user.name "github-actions[bot]"
@@ -276,7 +287,7 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          custom_tag: ${{ needs.calculate-semver.outputs.new_version }}
+          custom_tag: ${{ needs.prepare-prod-promotion.outputs.new_version }}
 
   # ==========================================
   # NOTIFICATIONS
@@ -297,14 +308,30 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-sast-snyk-scan-failed:
-    needs: [sast-snyk-scan]
-    if: ${{ always() && needs.sast-snyk-scan.result == 'failure' }}
+  notify-sast-sonar-scan-failed:
+    needs: [sast-sonar-scan]
+    if: ${{ always() && needs.sast-sonar-scan.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "QuickHaul"
       environment: "CI/CD"
-      failed_job_name: "sast-snyk-scan"
+      failed_job_name: "sast-sonar-scan"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+    secrets: inherit
+
+  notify-sca-snyk-scan-failed:
+    needs: [sca-snyk-scan]
+    if: ${{ always() && needs.sca-snyk-scan.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "QuickHaul"
+      environment: "CI/CD"
+      failed_job_name: "sca-snyk-scan"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"
@@ -329,14 +356,14 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-build-dev-images-failed:
-    needs: [build-dev-images]
-    if: ${{ always() && needs.build-dev-images.result == 'failure' }}
+  notify-build-scan-push-failed:
+    needs: [build-scan-push]
+    if: ${{ always() && needs.build-scan-push.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "QuickHaul"
       environment: "CI/CD"
-      failed_job_name: "build-dev-images"
+      failed_job_name: "build-scan-push"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"
@@ -345,14 +372,30 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-update-values-dev-failed:
-    needs: [update-values-dev-yaml]
-    if: ${{ always() && needs.update-values-dev-yaml.result == 'failure' }}
+  notify-helm-values-update-failed:
+    needs: [helm-values-update]
+    if: ${{ always() && needs.helm-values-update.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "QuickHaul"
       environment: "CI/CD"
-      failed_job_name: "update-values-dev-yaml"
+      failed_job_name: "helm-values-update"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+    secrets: inherit
+
+  notify-prepare-prod-promotion-failed:
+    needs: [prepare-prod-promotion]
+    if: ${{ always() && needs.prepare-prod-promotion.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "QuickHaul"
+      environment: "CI/CD"
+      failed_job_name: "prepare-prod-promotion"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"
@@ -377,14 +420,14 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-release-prod-failed:
-    needs: [retag-and-push-prod-images, update-values-prod-yaml]
-    if: ${{ always() && (needs.retag-and-push-prod-images.result == 'failure' || needs.update-values-prod-yaml.result == 'failure') }}
+  notify-promote-to-prod-failed:
+    needs: [promote-to-prod]
+    if: ${{ always() && needs.promote-to-prod.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "QuickHaul"
       environment: "CI/CD"
-      failed_job_name: "release-prod"
+      failed_job_name: "promote-to-prod"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"

@@ -22,3 +22,5 @@ kubernetes>=30.1.0
 azure-mgmt-costmanagement
 sendgrid
 httpx
+# dummy trigger
+

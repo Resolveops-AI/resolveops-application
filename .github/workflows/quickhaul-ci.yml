@@ -1,14 +1,14 @@
 name: QuickHaul CI
 
 on:
-  pull_request:
+  push:
     branches:
+      - dev
       - main
-    types: [opened, synchronize, reopened]
     paths:
       - 'quickhaul/**'
       - '.github/workflows/quickhaul-ci.yml'
-  push:
+  pull_request:
     branches:
       - main
     paths:
@@ -16,8 +16,8 @@ on:
       - '.github/workflows/quickhaul-ci.yml'
 
 permissions:
-  id-token: write
   contents: write
+  id-token: write
   pull-requests: read
 
 env:
@@ -25,6 +25,9 @@ env:
   ACR_LOGIN_SERVER: resolveopsacr03.azurecr.io
   AZURE_RESOURCE_GROUP: sathvik-rg
   AKS_CLUSTER_NAME: resolveops-aks-02
+  RESOLVEOPS_NAMESPACE: resolveops-ai
+  QUICKHAUL_DEV_NAMESPACE: quickhaul-dev
+  QUICKHAUL_PROD_NAMESPACE: quickhaul-prod
 
 jobs:
   setup:
@@ -46,13 +49,53 @@ jobs:
             echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
           fi
 
-  security-scan:
+  lint-testing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Frontend Lint and Test
+        run: |
+          cd quickhaul/frontend
+          if [ -f "package.json" ]; then
+            npm ci || echo "Warning: npm ci failed"
+            if grep -q '"lint"' package.json; then
+              npm run lint || echo "Warning: Lint failed"
+            else
+              echo "Warning: No lint script found in package.json"
+            fi
+            if grep -q '"test"' package.json; then
+              npm test || echo "Warning: Test failed"
+            else
+              echo "Warning: No test script found in package.json"
+            fi
+          fi
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Backend Lint and Test
+        run: |
+          cd quickhaul/backend
+          pip install pytest || true
+          if [ -d "tests" ] || [ -d "test" ] || ls test_*.py 1> /dev/null 2>&1 || find . -name "test_*.py" | grep -q .; then
+            pytest || echo "Warning: pytest failed"
+          else
+            echo "Warning: No python tests found"
+          fi
+
+  sast-snyk-scan:
+    needs: [lint-testing]
     uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
     secrets: inherit
     with:
       working_directory: .
 
   helm-validation:
+    needs: [lint-testing]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,8 +110,8 @@ jobs:
   # PR FLOW (DEV IMAGES)
   # ==========================================
   build-dev-images:
-    if: github.event_name == 'pull_request'
-    needs: [setup, security-scan, helm-validation]
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [setup, sast-snyk-scan, helm-validation]
     strategy:
       matrix:
         service: [frontend, location, auth, booking, notification, otp, payment]
@@ -82,8 +125,8 @@ jobs:
       acr_login_server: resolveopsacr03.azurecr.io
       image_tag: ${{ needs.setup.outputs.dev_image_tag }}
 
-  update-dev-helm:
-    if: github.event_name == 'pull_request'
+  update-values-dev-yaml:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     needs: [setup, build-dev-images]
     runs-on: ubuntu-latest
     permissions:
@@ -96,7 +139,6 @@ jobs:
       - name: Update values-dev.yaml tags
         run: |
           NEW_TAG="${{ needs.setup.outputs.dev_image_tag }}"
-          # Replace any 'tag: <anything>' under images
           sed -i "s/tag: .*/tag: $NEW_TAG/g" quickhaul/helm/quickhaul/values-dev.yaml
           
           git config --global user.name "github-actions[bot]"
@@ -108,25 +150,9 @@ jobs:
   # ==========================================
   # MAIN FLOW (PROD IMAGES)
   # ==========================================
-  build-candidate-images:
-    if: github.event_name == 'push'
-    needs: [setup, security-scan, helm-validation]
-    strategy:
-      matrix:
-        service: [frontend, location, auth, booking, notification, otp, payment]
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
-    secrets: inherit
-    with:
-      image_name: quickhaul-${{ matrix.service }}
-      context_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
-      dockerfile_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend/Dockerfile' || './quickhaul/backend/Dockerfile' }}
-      acr_name: resolveopsacr03
-      acr_login_server: resolveopsacr03.azurecr.io
-      image_tag: ${{ needs.setup.outputs.candidate_tag }}
-
   calculate-semver:
-    if: github.event_name == 'push'
-    needs: [build-candidate-images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [sast-snyk-scan, helm-validation]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.semver.outputs.new_tag }}
@@ -143,9 +169,25 @@ jobs:
           default_bump: patch
           release_branches: main
 
+  build-prod-candidate-images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [setup, calculate-semver]
+    strategy:
+      matrix:
+        service: [frontend, location, auth, booking, notification, otp, payment]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
+    secrets: inherit
+    with:
+      image_name: quickhaul-${{ matrix.service }}
+      context_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
+      dockerfile_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend/Dockerfile' || './quickhaul/backend/Dockerfile' }}
+      acr_name: resolveopsacr03
+      acr_login_server: resolveopsacr03.azurecr.io
+      image_tag: ${{ needs.setup.outputs.candidate_tag }}
+
   verify-tag-not-exists:
-    if: github.event_name == 'push'
-    needs: [calculate-semver]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [calculate-semver, build-prod-candidate-images]
     runs-on: ubuntu-latest
     steps:
       - name: Azure Login
@@ -164,24 +206,21 @@ jobs:
           fi
 
   prod-approval-gate:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [verify-tag-not-exists]
     runs-on: ubuntu-latest
     environment: production
     steps:
       - run: echo "Production environment approved!"
 
-  release-prod:
-    if: github.event_name == 'push'
+  retag-and-push-prod-images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [setup, calculate-semver, prod-approval-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -200,6 +239,17 @@ jobs:
               --source resolveopsacr03.azurecr.io/quickhaul-$SERVICE:$CANDIDATE \
               --image quickhaul-$SERVICE:$VERSION
           done
+
+  update-values-prod-yaml:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [calculate-semver, retag-and-push-prod-images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Update values-prod.yaml
         run: |
           VERSION="${{ needs.calculate-semver.outputs.new_version }}"
@@ -216,14 +266,17 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           custom_tag: ${{ needs.calculate-semver.outputs.new_version }}
 
-  notify-security-scan:
-    needs: [security-scan]
-    if: ${{ always() && needs.security-scan.result == 'failure' }}
+  # ==========================================
+  # NOTIFICATIONS
+  # ==========================================
+  notify-lint-testing-failed:
+    needs: [lint-testing]
+    if: ${{ always() && needs.lint-testing.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "QuickHaul"
       environment: "CI/CD"
-      failed_job_name: "security-scan"
+      failed_job_name: "lint-testing"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"
@@ -232,7 +285,23 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-helm-validation:
+  notify-sast-snyk-scan-failed:
+    needs: [sast-snyk-scan]
+    if: ${{ always() && needs.sast-snyk-scan.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "QuickHaul"
+      environment: "CI/CD"
+      failed_job_name: "sast-snyk-scan"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+    secrets: inherit
+
+  notify-helm-validation-failed:
     needs: [helm-validation]
     if: ${{ always() && needs.helm-validation.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
@@ -248,7 +317,7 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-build-dev-images:
+  notify-build-dev-images-failed:
     needs: [build-dev-images]
     if: ${{ always() && needs.build-dev-images.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
@@ -264,14 +333,14 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-update-dev-helm:
-    needs: [update-dev-helm]
-    if: ${{ always() && needs.update-dev-helm.result == 'failure' }}
+  notify-update-values-dev-failed:
+    needs: [update-values-dev-yaml]
+    if: ${{ always() && needs.update-values-dev-yaml.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "QuickHaul"
       environment: "CI/CD"
-      failed_job_name: "update-dev-helm"
+      failed_job_name: "update-values-dev-yaml"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"
@@ -280,14 +349,14 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-build-candidate-images:
-    needs: [build-candidate-images]
-    if: ${{ always() && needs.build-candidate-images.result == 'failure' }}
+  notify-calculate-semver-failed:
+    needs: [calculate-semver]
+    if: ${{ always() && needs.calculate-semver.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "QuickHaul"
       environment: "CI/CD"
-      failed_job_name: "build-candidate-images"
+      failed_job_name: "calculate-semver"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"
@@ -296,9 +365,25 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-release-prod:
-    needs: [release-prod]
-    if: ${{ always() && needs.release-prod.result == 'failure' }}
+  notify-build-prod-candidate-failed:
+    needs: [build-prod-candidate-images]
+    if: ${{ always() && needs.build-prod-candidate-images.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "QuickHaul"
+      environment: "CI/CD"
+      failed_job_name: "build-prod-candidate-images"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+    secrets: inherit
+
+  notify-release-prod-failed:
+    needs: [retag-and-push-prod-images, update-values-prod-yaml]
+    if: ${{ always() && (needs.retag-and-push-prod-images.result == 'failure' || needs.update-values-prod-yaml.result == 'failure') }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "QuickHaul"

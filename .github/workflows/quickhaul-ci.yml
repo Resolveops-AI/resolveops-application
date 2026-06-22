@@ -220,34 +220,94 @@ jobs:
     needs: [security-scan]
     if: ${{ always() && needs.security-scan.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "QuickHaul"
+      environment: "CI/CD"
+      failed_job_name: "security-scan"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
   notify-helm-validation:
     needs: [helm-validation]
     if: ${{ always() && needs.helm-validation.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "QuickHaul"
+      environment: "CI/CD"
+      failed_job_name: "helm-validation"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
   notify-build-dev-images:
     needs: [build-dev-images]
     if: ${{ always() && needs.build-dev-images.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "QuickHaul"
+      environment: "CI/CD"
+      failed_job_name: "build-dev-images"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
   notify-update-dev-helm:
     needs: [update-dev-helm]
     if: ${{ always() && needs.update-dev-helm.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "QuickHaul"
+      environment: "CI/CD"
+      failed_job_name: "update-dev-helm"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
   notify-build-candidate-images:
     needs: [build-candidate-images]
     if: ${{ always() && needs.build-candidate-images.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "QuickHaul"
+      environment: "CI/CD"
+      failed_job_name: "build-candidate-images"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
   notify-release-prod:
     needs: [release-prod]
     if: ${{ always() && needs.release-prod.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "QuickHaul"
+      environment: "CI/CD"
+      failed_job_name: "release-prod"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
     secrets: inherit

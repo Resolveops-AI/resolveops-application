@@ -12,32 +12,54 @@ permissions:
 
 jobs:
   build:
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build.yml@main
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build-push.yml@main
     secrets: inherit
     with:
       image-name: quickhaul-frontend
-      context: ./quickhaul/frontend
+      context-path: ./quickhaul/frontend
+      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}
 
-  deploy-dev:
+  trivy-scan:
     needs: build
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-helm-deploy.yml@main
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-trivy-scan.yml@main
     secrets: inherit
     with:
+      image-name: quickhaul-frontend
+      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}
+
+  helm-validate:
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-helm-validate.yml@main
+    with:
+      working-directory: "./quickhaul/helm"
+      helm-chart-path: "quickhaul"
+      helm-values-file: "values-dev.yaml"
+
+  deploy-dev:
+    needs: [trivy-scan, helm-validate]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-helm-deploy-aks.yml@main
+    secrets: inherit
+    with:
+      environment: "dev"
       namespace: ${{ vars.QUICKHAUL_DEV_NAMESPACE }}
-      aks-name: ${{ vars.QUICKHAUL_AKS_NAME }}
-      aks-rg: ${{ vars.QUICKHAUL_AKS_RESOURCE_GROUP }}
-      chart-path: ./quickhaul/helm/quickhaul
-      values-file: values-dev.yaml
+      aks-cluster-name: ${{ vars.QUICKHAUL_AKS_NAME }}
+      aks-resource-group: ${{ vars.QUICKHAUL_AKS_RESOURCE_GROUP }}
+      helm-chart-path: ./quickhaul/helm/quickhaul
+      helm-values-file: values-dev.yaml
       release-name: quickhaul-dev
+      image-name: quickhaul-frontend
+      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}
 
   deploy-prod:
     needs: deploy-dev
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-helm-deploy.yml@main
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-helm-deploy-aks.yml@main
     secrets: inherit
     with:
+      environment: "prod"
       namespace: ${{ vars.QUICKHAUL_PROD_NAMESPACE }}
-      aks-name: ${{ vars.QUICKHAUL_AKS_NAME }}
-      aks-rg: ${{ vars.QUICKHAUL_AKS_RESOURCE_GROUP }}
-      chart-path: ./quickhaul/helm/quickhaul
-      values-file: values-prod.yaml
+      aks-cluster-name: ${{ vars.QUICKHAUL_AKS_NAME }}
+      aks-resource-group: ${{ vars.QUICKHAUL_AKS_RESOURCE_GROUP }}
+      helm-chart-path: ./quickhaul/helm/quickhaul
+      helm-values-file: values-prod.yaml
       release-name: quickhaul-prod
+      image-name: quickhaul-frontend
+      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}

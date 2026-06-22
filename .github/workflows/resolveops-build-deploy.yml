@@ -12,17 +12,27 @@ permissions:
 
 jobs:
   build:
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build.yml@main
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build-push.yml@main
     secrets: inherit
     with:
       image-name: resolveops-frontend
-      context: ./frontend
+      context-path: ./frontend
+      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}
+
+  trivy-scan:
+    needs: build
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-trivy-scan.yml@main
+    secrets: inherit
+    with:
+      image-name: resolveops-frontend
+      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}
 
   deploy:
-    needs: build
+    needs: trivy-scan
     uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-kubernetes-deploy.yml@main
     secrets: inherit
     with:
       namespace: ${{ vars.RESOLVEOPS_NAMESPACE }}
-      aks-name: ${{ vars.RESOLVEOPS_AKS_NAME }}
-      aks-rg: ${{ vars.RESOLVEOPS_AKS_RESOURCE_GROUP }}
+      aks_cluster_name: ${{ vars.RESOLVEOPS_AKS_NAME }}
+      aks_resource_group: ${{ vars.RESOLVEOPS_AKS_RESOURCE_GROUP }}
+      manifest_path: ./kubernetes/base

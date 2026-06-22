@@ -1,52 +1,181 @@
-name: ResolveOps CI
+name: ResolveOps AI CI
 
 on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'resolveops-ai/**'
+      - '.github/workflows/resolveops-ci.yml'
   push:
     branches:
       - main
     paths:
-      - 'frontend/**'
-      - 'services/**'
-      - 'kubernetes/**'
+      - 'resolveops-ai/**'
       - '.github/workflows/resolveops-ci.yml'
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
+  pull-requests: read
+
+env:
+  ACR_NAME: resolveopsacr03
+  ACR_LOGIN_SERVER: resolveopsacr03.azurecr.io
+  AZURE_RESOURCE_GROUP: sathvik-rg
 
 jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
       short_sha: ${{ steps.vars.outputs.short_sha }}
+      dev_image_tag: ${{ steps.vars.outputs.dev_image_tag }}
+      candidate_tag: ${{ steps.vars.outputs.candidate_tag }}
     steps:
-      - name: Calculate SHA
+      - name: Calculate Variables
         id: vars
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "dev_image_tag=resolveops-pr-${{ github.event.pull_request.number }}-$SHORT_SHA" >> $GITHUB_OUTPUT
+          else
+            echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
+          fi
 
   security-scan:
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-security-scan.yml@main
-    secrets: inherit
-
-  build-and-push:
-    needs: [setup, security-scan]
-    strategy:
-      matrix:
-        service:
-          - frontend
-          - ai-rca-service
-          - api-gateway-service
-          - auth-service
-          - aws-intelligence-service
-          - azure-intelligence-service
-          - github-intelligence-service
-          - notification-service
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build-push.yml@main
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
     secrets: inherit
     with:
-      image-name: resolveops-${{ matrix.service }}
-      context-path: ${{ matrix.service == 'frontend' && './frontend' || format('./services/{0}', matrix.service) }}
-      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}
-      image-tag: app-${{ needs.setup.outputs.short_sha }}
+      working_directory: .
+
+  # ==========================================
+  # PR FLOW (DEV IMAGES)
+  # ==========================================
+  build-dev-images:
+    if: github.event_name == 'pull_request'
+    needs: [setup, security-scan]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
+    secrets: inherit
+    with:
+      image-name: resolveops-ai
+      context-path: ./resolveops-ai
+      acr-login-server: resolveopsacr03.azurecr.io
+      image-tag: ${{ needs.setup.outputs.dev_image_tag }}
+
+  # ==========================================
+  # MAIN FLOW (PROD IMAGES)
+  # ==========================================
+  build-candidate-images:
+    if: github.event_name == 'push'
+    needs: [setup, security-scan]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
+    secrets: inherit
+    with:
+      image-name: resolveops-ai
+      context-path: ./resolveops-ai
+      acr-login-server: resolveopsacr03.azurecr.io
+      image-tag: ${{ needs.setup.outputs.candidate_tag }}
+
+  calculate-semver:
+    if: github.event_name == 'push'
+    needs: [build-candidate-images]
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.semver.outputs.new_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Calculate Next Version
+        id: semver
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dry_run: true
+          default_bump: patch
+          release_branches: main
+
+  verify-tag-not-exists:
+    if: github.event_name == 'push'
+    needs: [calculate-semver]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Check ACR for Tag
+        run: |
+          TAG="${{ needs.calculate-semver.outputs.new_version }}"
+          EXISTS=$(az acr repository show-tags -n resolveopsacr03 --repository resolveops-ai --query "[?@ == '$TAG']" -o tsv)
+          if [ -n "$EXISTS" ]; then
+            echo "Error: Tag $TAG already exists in ACR!"
+            exit 1
+          fi
+
+  prod-approval-gate:
+    if: github.event_name == 'push'
+    needs: [verify-tag-not-exists]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "Production environment approved!"
+
+  release-prod:
+    if: github.event_name == 'push'
+    needs: [setup, calculate-semver, prod-approval-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Retag and Push Image
+        run: |
+          CANDIDATE="${{ needs.setup.outputs.candidate_tag }}"
+          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          
+          echo "Retagging resolveops-ai from $CANDIDATE to $VERSION..."
+          az acr import --name resolveopsacr03 \
+            --source resolveopsacr03.azurecr.io/resolveops-ai:$CANDIDATE \
+            --image resolveops-ai:$VERSION
+      - name: Create Git Tag
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          custom_tag: ${{ needs.calculate-semver.outputs.new_version }}
+
+  notify-security-scan:
+    needs: [security-scan]
+    if: ${{ always() && needs.security-scan.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+
+  notify-build-dev-images:
+    needs: [build-dev-images]
+    if: ${{ always() && needs.build-dev-images.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+
+  notify-build-candidate-images:
+    needs: [build-candidate-images]
+    if: ${{ always() && needs.build-candidate-images.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+
+  notify-release-prod:
+    needs: [release-prod]
+    if: ${{ always() && needs.release-prod.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit

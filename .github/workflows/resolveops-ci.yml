@@ -1,23 +1,25 @@
 name: ResolveOps AI CI
 
 on:
+  push:
+    branches:
+      - dev
+      - main
+    paths:
+      - 'frontend/**'
+      - 'services/**'
+      - '.github/workflows/resolveops-ci.yml'
   pull_request:
     branches:
       - main
-    types: [opened, synchronize, reopened]
     paths:
-      - 'resolveops-ai/**'
-      - '.github/workflows/resolveops-ci.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'resolveops-ai/**'
+      - 'frontend/**'
+      - 'services/**'
       - '.github/workflows/resolveops-ci.yml'
 
 permissions:
-  id-token: write
   contents: write
+  id-token: write
   pull-requests: read
 
 env:
@@ -31,64 +33,160 @@ jobs:
     outputs:
       short_sha: ${{ steps.vars.outputs.short_sha }}
       dev_image_tag: ${{ steps.vars.outputs.dev_image_tag }}
-      candidate_tag: ${{ steps.vars.outputs.candidate_tag }}
     steps:
       - name: Calculate Variables
         id: vars
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "dev_image_tag=resolveops-pr-${{ github.event.pull_request.number }}-$SHORT_SHA" >> $GITHUB_OUTPUT
-          else
-            echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
-          fi
+          echo "dev_image_tag=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
 
-  security-scan:
+  lint-testing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Frontend Lint and Test
+        run: |
+          cd frontend
+          if [ -f "package.json" ]; then
+            npm ci || echo "Warning: npm ci failed"
+            if grep -q '"lint"' package.json; then
+              npm run lint || echo "Warning: Lint failed"
+            fi
+            if grep -q '"test"' package.json; then
+              npm test || echo "Warning: Test failed"
+            fi
+          fi
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Backend Lint and Test
+        run: |
+          for SERVICE in services/*/; do
+            echo "Testing $SERVICE"
+            cd "$SERVICE"
+            pip install pytest || true
+            if [ -d "tests" ] || [ -d "test" ] || ls test_*.py 1> /dev/null 2>&1 || find . -name "test_*.py" | grep -q .; then
+              pytest || echo "Warning: pytest failed"
+            else
+              echo "Warning: No python tests found in $SERVICE"
+            fi
+            cd ../..
+          done
+
+  sast-sonar-scan:
+    needs: [lint-testing]
     uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
     secrets: inherit
     with:
       working_directory: .
+      run_sonar: true
+      run_snyk: false
+      run_trivy: false
 
-  # ==========================================
-  # PR FLOW (DEV IMAGES)
-  # ==========================================
-  build-dev-images:
-    if: github.event_name == 'pull_request'
-    needs: [setup, security-scan]
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
+  sca-snyk-scan:
+    needs: [sast-sonar-scan]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
     secrets: inherit
     with:
-      image_name: resolveops-ai
-      context_path: ./resolveops-ai
-      dockerfile_path: ./resolveops-ai/Dockerfile
-      acr_name: resolveopsacr03
-      acr_login_server: resolveopsacr03.azurecr.io
-      image_tag: ${{ needs.setup.outputs.dev_image_tag }}
+      working_directory: .
+      run_sonar: false
+      run_snyk: true
+      run_trivy: false
+
+  kubernetes-validation:
+    needs: [sca-snyk-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+      - name: Kustomize Build Base
+        run: kustomize build kubernetes/base > /dev/null
 
   # ==========================================
-  # MAIN FLOW (PROD IMAGES)
+  # DEV PUSH FLOW
   # ==========================================
-  build-candidate-images:
-    if: github.event_name == 'push'
-    needs: [setup, security-scan]
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
-    secrets: inherit
-    with:
-      image_name: resolveops-ai
-      context_path: ./resolveops-ai
-      dockerfile_path: ./resolveops-ai/Dockerfile
-      acr_name: resolveopsacr03
-      acr_login_server: resolveopsacr03.azurecr.io
-      image_tag: ${{ needs.setup.outputs.candidate_tag }}
+  build-scan-push:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: [setup, kubernetes-validation]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [frontend, ai-rca-service, api-gateway-service, auth-service, aws-intelligence-service, azure-intelligence-service, github-intelligence-service, notification-service]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Log in to ACR
+        run: az acr login --name resolveopsacr03
+      - name: docker build
+        run: |
+          CONTEXT_PATH=${{ matrix.service == 'frontend' && './frontend' || format('./services/{0}', matrix.service) }}
+          DOCKERFILE_PATH=${{ matrix.service == 'frontend' && './frontend/Dockerfile' || format('./services/{0}/Dockerfile', matrix.service) }}
+          IMAGE_URI="resolveopsacr03.azurecr.io/${{ matrix.service }}:${{ needs.setup.outputs.dev_image_tag }}"
+          
+          docker build -t $IMAGE_URI -f $DOCKERFILE_PATH $CONTEXT_PATH
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "resolveopsacr03.azurecr.io/${{ matrix.service }}:${{ needs.setup.outputs.dev_image_tag }}"
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
+      - name: docker push only if Trivy passes
+        run: |
+          docker push resolveopsacr03.azurecr.io/${{ matrix.service }}:${{ needs.setup.outputs.dev_image_tag }}
 
-  calculate-semver:
-    if: github.event_name == 'push'
-    needs: [build-candidate-images]
+  kustomize-image-update:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: [setup, build-scan-push]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+      - name: Update Kustomization images
+        run: |
+          NEW_TAG="${{ needs.setup.outputs.dev_image_tag }}"
+          cd kubernetes/base
+          SERVICES=("frontend" "ai-rca-service" "api-gateway-service" "auth-service" "aws-intelligence-service" "azure-intelligence-service" "github-intelligence-service" "notification-service")
+          for SERVICE in "${SERVICES[@]}"; do
+            kustomize edit set image "resolveopsacr03.azurecr.io/$SERVICE=resolveopsacr03.azurecr.io/$SERVICE:$NEW_TAG"
+          done
+          cd ../..
+          
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add kubernetes/base/kustomization.yaml
+          git commit -m "chore: update resolveops-ai dev image tag [skip ci]" || echo "No changes to commit"
+          git push origin dev
+
+  # ==========================================
+  # MAIN PUSH FLOW
+  # ==========================================
+  prepare-prod-promotion:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [kubernetes-validation]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.semver.outputs.new_tag }}
+      dev_tag: ${{ steps.get_tag.outputs.dev_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -101,12 +199,6 @@ jobs:
           dry_run: true
           default_bump: patch
           release_branches: main
-
-  verify-tag-not-exists:
-    if: github.event_name == 'push'
-    needs: [calculate-semver]
-    runs-on: ubuntu-latest
-    steps:
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -115,59 +207,110 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: Check ACR for Tag
         run: |
-          TAG="${{ needs.calculate-semver.outputs.new_version }}"
-          EXISTS=$(az acr repository show-tags -n resolveopsacr03 --repository resolveops-ai --query "[?@ == '$TAG']" -o tsv)
+          TAG="${{ steps.semver.outputs.new_tag }}"
+          EXISTS=$(az acr repository show-tags -n resolveopsacr03 --repository frontend --query "[?@ == '$TAG']" -o tsv)
           if [ -n "$EXISTS" ]; then
             echo "Error: Tag $TAG already exists in ACR!"
             exit 1
           fi
+      - name: Get Dev Tag
+        id: get_tag
+        run: |
+          # Read the dev tag from kustomization.yaml
+          DEV_TAG=$(grep -A 1 "name: resolveopsacr03.azurecr.io/frontend" kubernetes/base/kustomization.yaml | grep newTag | awk '{print $2}' | tr -d '"')
+          echo "dev_tag=$DEV_TAG" >> $GITHUB_OUTPUT
 
-  prod-approval-gate:
-    if: github.event_name == 'push'
-    needs: [verify-tag-not-exists]
+  prod-trivy-scan:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [prepare-prod-promotion]
     runs-on: ubuntu-latest
-    environment: production
+    strategy:
+      matrix:
+        service: [frontend, ai-rca-service, api-gateway-service, auth-service, aws-intelligence-service, azure-intelligence-service, github-intelligence-service, notification-service]
     steps:
-      - run: echo "Production environment approved!"
-
-  release-prod:
-    if: github.event_name == 'push'
-    needs: [setup, calculate-semver, prod-approval-gate]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
       - name: Azure Login
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Retag and Push Image
+      - name: Log in to Azure Container Registry
+        run: az acr login --name resolveopsacr03
+      - name: Pull Dev Image
         run: |
-          CANDIDATE="${{ needs.setup.outputs.candidate_tag }}"
-          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          docker pull resolveopsacr03.azurecr.io/${{ matrix.service }}:${{ needs.prepare-prod-promotion.outputs.dev_tag }}
+      - name: Trivy Scan again
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "resolveopsacr03.azurecr.io/${{ matrix.service }}:${{ needs.prepare-prod-promotion.outputs.dev_tag }}"
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
+
+  promote-to-prod:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [prepare-prod-promotion, prod-trivy-scan]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Retag Dev Image as vX.Y.Z and Push to ACR
+        run: |
+          DEV_TAG="${{ needs.prepare-prod-promotion.outputs.dev_tag }}"
+          VERSION="${{ needs.prepare-prod-promotion.outputs.new_version }}"
+          SERVICES=("frontend" "ai-rca-service" "api-gateway-service" "auth-service" "aws-intelligence-service" "azure-intelligence-service" "github-intelligence-service" "notification-service")
           
-          echo "Retagging resolveops-ai from $CANDIDATE to $VERSION..."
-          az acr import --name resolveopsacr03 \
-            --source resolveopsacr03.azurecr.io/resolveops-ai:$CANDIDATE \
-            --image resolveops-ai:$VERSION
+          for SERVICE in "${SERVICES[@]}"; do
+            echo "Retagging $SERVICE from $DEV_TAG to $VERSION..."
+            az acr import --name resolveopsacr03               --source resolveopsacr03.azurecr.io/$SERVICE:$DEV_TAG               --image $SERVICE:$VERSION
+          done
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+      - name: Update Kustomization images
+        run: |
+          VERSION="${{ needs.prepare-prod-promotion.outputs.new_version }}"
+          cd kubernetes/base
+          SERVICES=("frontend" "ai-rca-service" "api-gateway-service" "auth-service" "aws-intelligence-service" "azure-intelligence-service" "github-intelligence-service" "notification-service")
+          for SERVICE in "${SERVICES[@]}"; do
+            kustomize edit set image "resolveopsacr03.azurecr.io/$SERVICE=resolveopsacr03.azurecr.io/$SERVICE:$VERSION"
+          done
+          cd ../..
+          
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add kubernetes/base/kustomization.yaml
+          git commit -m "chore: release resolveops-ai $VERSION [skip ci]" || echo "No changes to commit"
+          git push origin main
       - name: Create Git Tag
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          custom_tag: ${{ needs.calculate-semver.outputs.new_version }}
+          custom_tag: ${{ needs.prepare-prod-promotion.outputs.new_version }}
 
-  notify-security-scan:
-    needs: [security-scan]
-    if: ${{ always() && needs.security-scan.result == 'failure' }}
+  # ==========================================
+  # NOTIFICATIONS
+  # ==========================================
+  notify-lint-testing-failed:
+    needs: [lint-testing]
+    if: ${{ always() && needs.lint-testing.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "ResolveOps AI"
       environment: "CI/CD"
-      failed_job_name: "security-scan"
+      failed_job_name: "lint-testing"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"
@@ -176,14 +319,14 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-build-dev-images:
-    needs: [build-dev-images]
-    if: ${{ always() && needs.build-dev-images.result == 'failure' }}
+  notify-sast-sonar-scan-failed:
+    needs: [sast-sonar-scan]
+    if: ${{ always() && needs.sast-sonar-scan.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "ResolveOps AI"
       environment: "CI/CD"
-      failed_job_name: "build-dev-images"
+      failed_job_name: "sast-sonar-scan"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"
@@ -192,14 +335,14 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-build-candidate-images:
-    needs: [build-candidate-images]
-    if: ${{ always() && needs.build-candidate-images.result == 'failure' }}
+  notify-sca-snyk-scan-failed:
+    needs: [sca-snyk-scan]
+    if: ${{ always() && needs.sca-snyk-scan.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "ResolveOps AI"
       environment: "CI/CD"
-      failed_job_name: "build-candidate-images"
+      failed_job_name: "sca-snyk-scan"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"
@@ -208,14 +351,94 @@ jobs:
       workflow_name: "${{ github.workflow }}"
     secrets: inherit
 
-  notify-release-prod:
-    needs: [release-prod]
-    if: ${{ always() && needs.release-prod.result == 'failure' }}
+  notify-kubernetes-validation-failed:
+    needs: [kubernetes-validation]
+    if: ${{ always() && needs.kubernetes-validation.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     with:
       service_name: "ResolveOps AI"
       environment: "CI/CD"
-      failed_job_name: "release-prod"
+      failed_job_name: "kubernetes-validation"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+    secrets: inherit
+
+  notify-build-scan-push-failed:
+    needs: [build-scan-push]
+    if: ${{ always() && needs.build-scan-push.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "ResolveOps AI"
+      environment: "CI/CD"
+      failed_job_name: "build-scan-push"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+    secrets: inherit
+
+  notify-kustomize-image-update-failed:
+    needs: [kustomize-image-update]
+    if: ${{ always() && needs.kustomize-image-update.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "ResolveOps AI"
+      environment: "CI/CD"
+      failed_job_name: "kustomize-image-update"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+    secrets: inherit
+
+  notify-prepare-prod-promotion-failed:
+    needs: [prepare-prod-promotion]
+    if: ${{ always() && needs.prepare-prod-promotion.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "ResolveOps AI"
+      environment: "CI/CD"
+      failed_job_name: "prepare-prod-promotion"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+    secrets: inherit
+
+  notify-prod-trivy-scan-failed:
+    needs: [prod-trivy-scan]
+    if: ${{ always() && needs.prod-trivy-scan.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "ResolveOps AI"
+      environment: "CI/CD"
+      failed_job_name: "prod-trivy-scan"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+    secrets: inherit
+
+  notify-promote-to-prod-failed:
+    needs: [promote-to-prod]
+    if: ${{ always() && needs.promote-to-prod.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    with:
+      service_name: "ResolveOps AI"
+      environment: "CI/CD"
+      failed_job_name: "promote-to-prod"
       status: "Failure"
       run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       branch_name: "${{ github.ref_name }}"

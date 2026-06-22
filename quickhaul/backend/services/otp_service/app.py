@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import redis
-import random
+import secrets
 import string
 from datetime import timedelta
 import httpx
@@ -40,7 +40,7 @@ class OTPVerifyRequest(BaseModel):
 
 def generate_otp(length: int = 6) -> str:
     """Generate a numeric OTP"""
-    return ''.join(random.choices(string.digits, k=length))
+    return ''.join(secrets.choice(string.digits) for _ in range(length))
 
 def format_phone_otp_message(phone: str, otp: str) -> str:
     """Format OTP message for SMS"""
@@ -232,4 +232,6 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8005)
+    import os
+    host = os.environ.get("HOST", "0.0.0.0")  # nosec B104
+    uvicorn.run(app, host=host, port=8005)

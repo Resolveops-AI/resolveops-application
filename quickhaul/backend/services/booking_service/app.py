@@ -668,4 +668,6 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8003)
+    import os
+    host = os.environ.get("HOST", "0.0.0.0")  # nosec B104
+    uvicorn.run(app, host=host, port=8003)

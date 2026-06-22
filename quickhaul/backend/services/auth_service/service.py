@@ -1,5 +1,5 @@
 import logging
-import random
+import secrets
 import smtplib
 import socket
 from email.mime.text import MIMEText
@@ -74,7 +74,7 @@ async def send_otp_email(to_email: str, otp: str) -> bool:
 
 async def generate_and_send_otp(email: str):
     """Generate OTP, store in Redis, and send email synchronously for verification"""
-    otp = str(random.randint(100000, 999999))
+    otp = str(secrets.randbelow(900000) + 100000)
     redis = get_redis()
     
     # Store OTP in Redis immediately
@@ -134,7 +134,7 @@ async def register_user(payload, db: AsyncIOMotorDatabase):
         }
 
     token = create_access_token(user_id)
-    return {"access_token": token, "token_type": "bearer", "user_id": user_id, "email": user_email}
+    return {"access_token": token, "token_type": "bearer", "user_id": user_id, "email": user_email}  # nosec B105
 
 
 async def login_user(payload, db: AsyncIOMotorDatabase):
@@ -152,4 +152,4 @@ async def login_user(payload, db: AsyncIOMotorDatabase):
         
     user_id = str(user.get("_id") or user.get("id"))
     token = create_access_token(user_id)
-    return {"access_token": token, "token_type": "bearer", "user_id": user_id, "email": user["email"]}
+    return {"access_token": token, "token_type": "bearer", "user_id": user_id, "email": user["email"]}  # nosec B105

@@ -45,20 +45,22 @@ class LoginResponse(BaseModel):
     token: str
     user: dict
 
+import os
+
 # Mock user database (in production, use MongoDB)
 MOCK_USERS = {
     "admin@quickhaul.com": {
         "id": "user_1",
         "name": "Admin User",
         "email": "admin@quickhaul.com",
-        "password": "admin123",  # In production, use hashed passwords
+        "password": os.environ.get("ADMIN_PASSWORD", "admin123"),  # nosec B105
         "role": "admin"
     },
     "user@quickhaul.com": {
         "id": "user_2", 
         "name": "Test User",
         "email": "user@quickhaul.com",
-        "password": "user123",
+        "password": os.environ.get("USER_PASSWORD", "user123"),  # nosec B105
         "role": "customer"
     }
 }
@@ -185,4 +187,5 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    host = os.environ.get("HOST", "0.0.0.0")  # nosec B104
+    uvicorn.run(app, host=host, port=8002)

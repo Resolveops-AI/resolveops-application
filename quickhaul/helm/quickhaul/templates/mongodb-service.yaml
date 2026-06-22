@@ -1,0 +1,19 @@
+{{- if .Values.mongodb.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: quickhaul-mongodb
+  namespace: {{ .Values.namespaceOverride | default .Release.Namespace }}
+  labels:
+    {{- include "quickhaul.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb
+spec:
+  type: ClusterIP
+  selector:
+    app: quickhaul-mongodb
+  ports:
+    - name: mongo
+      port: {{ .Values.mongodb.service.port }}
+      targetPort: {{ .Values.mongodb.service.port }}
+      protocol: TCP
+{{- end }}

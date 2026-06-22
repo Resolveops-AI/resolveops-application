@@ -1,0 +1,88 @@
+name: QuickHaul Promote to Prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_image_tag:
+        description: 'Existing tested dev image tag, example dev-a1b2c3d'
+        required: true
+      release_version:
+        description: 'Semantic production version, example v1.0.0'
+        required: true
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  validate-and-retag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Release Version
+        run: |
+          if [[ ! "${{ github.event.inputs.release_version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            echo "Error: release_version must be a semantic version starting with 'v', e.g., v1.0.0"
+            exit 1
+          fi
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR Login
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: Retag Images
+        run: |
+          IMAGES=("quickhaul-frontend" "quickhaul-location" "quickhaul-auth" "quickhaul-booking" "quickhaul-notification" "quickhaul-otp" "quickhaul-payment")
+          
+          for IMAGE in "${IMAGES[@]}"; do
+            FULL_IMAGE="${{ vars.ACR_LOGIN_SERVER }}/$IMAGE"
+            SOURCE_TAG="${{ github.event.inputs.source_image_tag }}"
+            RELEASE_TAG="${{ github.event.inputs.release_version }}"
+            
+            # Check if release tag already exists
+            EXISTS=$(az acr repository show-tags -n ${{ vars.ACR_NAME }} --repository $IMAGE --query "contains(@, '$RELEASE_TAG')" -o tsv || echo "false")
+            if [ "$EXISTS" = "true" ]; then
+              echo "Error: Tag $RELEASE_TAG already exists for image $IMAGE. Semantic versions are immutable."
+              exit 1
+            fi
+            
+            echo "Pulling $FULL_IMAGE:$SOURCE_TAG..."
+            docker pull $FULL_IMAGE:$SOURCE_TAG
+            
+            echo "Tagging as $FULL_IMAGE:$RELEASE_TAG..."
+            docker tag $FULL_IMAGE:$SOURCE_TAG $FULL_IMAGE:$RELEASE_TAG
+            
+            echo "Pushing $FULL_IMAGE:$RELEASE_TAG..."
+            docker push $FULL_IMAGE:$RELEASE_TAG
+          done
+
+  update-helm:
+    needs: validate-and-retag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update Helm Values
+        run: |
+          sed -i "s/tag: v0.0.0/tag: ${{ github.event.inputs.release_version }}/g" quickhaul/helm/quickhaul/values-prod.yaml
+          sed -i "s/tag: v[0-9]*\.[0-9]*\.[0-9]*.*/tag: ${{ github.event.inputs.release_version }}/g" quickhaul/helm/quickhaul/values-prod.yaml
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add quickhaul/helm/quickhaul/values-prod.yaml
+          git commit -m "chore: promote quickhaul to ${{ github.event.inputs.release_version }} [skip ci]"
+          git push origin main
+
+  sync-argocd:
+    needs: update-helm
+    if: ${{ vars.ARGOCD_SERVER != '' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-argocd-sync.yml@main
+    secrets: inherit
+    with:
+      argocd-server: ${{ vars.ARGOCD_SERVER }}
+      argocd-app: quickhaul-prod

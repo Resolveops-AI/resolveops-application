@@ -1,0 +1,77 @@
+name: QuickHaul CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'quickhaul/**'
+      - '.github/workflows/quickhaul-ci.yml'
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      short_sha: ${{ steps.vars.outputs.short_sha }}
+      dev_image_tag: ${{ steps.vars.outputs.dev_image_tag }}
+    steps:
+      - name: Calculate SHAs
+        id: vars
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "dev_image_tag=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
+
+  security-scan:
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-security-scan.yml@main
+    secrets: inherit
+
+  build-and-push:
+    needs: [setup, security-scan]
+    strategy:
+      matrix:
+        service:
+          - frontend
+          - location
+          - auth
+          - booking
+          - notification
+          - otp
+          - payment
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build-push.yml@main
+    secrets: inherit
+    with:
+      image-name: quickhaul-${{ matrix.service }}
+      context-path: ${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
+      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}
+      image-tag: ${{ needs.setup.outputs.dev_image_tag }}
+
+  update-helm:
+    needs: [setup, build-and-push]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update Helm Values
+        run: |
+          sed -i "s/tag: dev-placeholder/tag: ${{ needs.setup.outputs.dev_image_tag }}/g" quickhaul/helm/quickhaul/values-dev.yaml
+          sed -i "s/tag: dev-[a-z0-9]*/tag: ${{ needs.setup.outputs.dev_image_tag }}/g" quickhaul/helm/quickhaul/values-dev.yaml
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add quickhaul/helm/quickhaul/values-dev.yaml
+          git commit -m "chore: update quickhaul dev image tag [skip ci]"
+          git push origin main
+
+  sync-argocd:
+    needs: update-helm
+    if: ${{ vars.ARGOCD_SERVER != '' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-argocd-sync.yml@main
+    secrets: inherit
+    with:
+      argocd-server: ${{ vars.ARGOCD_SERVER }}
+      argocd-app: quickhaul-dev

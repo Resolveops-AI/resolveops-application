@@ -1,56 +1,61 @@
-# ──────────────────────────────────────────────────────────────
-# values-dev.yaml — QuickHaul DEV overrides
-# Target namespace: quickhaul-dev
-# Low-cost, single replica, no ingress TLS, small resources
-# ──────────────────────────────────────────────────────────────
-
+namespaceOverride: quickhaul-dev
+replicaCount: 1
+global:
+  imageRegistry: <ACR_LOGIN_SERVER>
+frontend:
+  image:
+    tag: dev-placeholder
+  replicaCount: 1
+locationService:
+  image:
+    tag: dev-placeholder
+  replicaCount: 1
+authService:
+  image:
+    tag: dev-placeholder
+  replicaCount: 1
+bookingService:
+  image:
+    tag: dev-placeholder
+  replicaCount: 1
+notificationService:
+  image:
+    tag: dev-placeholder
+  replicaCount: 1
+otpService:
+  image:
+    tag: dev-placeholder
+  replicaCount: 1
+paymentService:
+  image:
+    tag: dev-placeholder
+  replicaCount: 1
 config:
-  mongoUri: "mongodb://quickhaul-mongodb:27017"
-  redisUrl: "redis://quickhaul-redis:6379/0"
-  frontendUrl: "http://quickhaul.sathvikdevops.site"
-
+  mongoUri: mongodb://quickhaul-mongodb:27017
+  redisUrl: redis://quickhaul-redis:6379/0
+  frontendUrl: http://dev.quickhaul.sathvikdevops.site
 mongodb:
+  auth:
+    username: quickhaul
+    password: change-me-dev
+    database: quickhaul_dev
   persistence:
     enabled: true
-    size: 1Gi
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 300m
-      memory: 256Mi
-
+    size: 2Gi
 redis:
   persistence:
     enabled: false
-
-frontend:
-  replicaCount: 1
-
-locationService:
-  replicaCount: 1
-
-authService:
-  replicaCount: 1
-
-bookingService:
-  replicaCount: 1
-
-notificationService:
-  replicaCount: 1
-
-otpService:
-  replicaCount: 1
-
-paymentService:
-  replicaCount: 1
-
 ingress:
   enabled: true
-  className: "azure/application-gateway"
-  host: "dev.quickhaul.sathvikdevops.site"
-
+  className: azure/application-gateway
+  host: dev.quickhaul.sathvikdevops.site
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 384Mi
 gatewayAPI:
   enabled: false
-  host: ""
+  host: ''

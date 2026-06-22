@@ -12,7 +12,7 @@ This runbook outlines the steps and validation checks to deploy and verify the R
 * **One Shared AKS Cluster**: Both applications run on the shared cluster `resolveops-aks-01`.
 * **Database Setup**:
   * **ResolveOps AI**: Uses Azure PostgreSQL. The connection string (`DATABASE_URL`) is retrieved from Key Vault secret `database-url` synced to the cluster.
-  * **QuickHaul**: Uses an in-cluster MongoDB pod with Persistent Volume claims (PVC size `2Gi` for dev, `5Gi` for prod) using the `managed-csi` StorageClass.
+  * **QuickHaul**: Uses an in-cluster MongoDB pod with Persistent Volume claims (PVC size `2Gi` for dev, `8Gi` for prod) using the `managed-csi` StorageClass.
 * **Reliability & Security**:
   * All workloads run as **non-root** users (ResolveOps uses UID/GID 10001, QuickHaul backend services use 10001, QuickHaul frontend runs Nginx on port 8080 under UID 101, MongoDB runs under UID 999).
   * Workloads include liveness/readiness probes, CPU/memory requests/limits, HorizontalPodAutoscalers (HPA), and NetworkPolicies.

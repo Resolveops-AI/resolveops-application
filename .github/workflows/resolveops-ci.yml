@@ -1,0 +1,52 @@
+name: ResolveOps CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - 'services/**'
+      - 'kubernetes/**'
+      - '.github/workflows/resolveops-ci.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      short_sha: ${{ steps.vars.outputs.short_sha }}
+    steps:
+      - name: Calculate SHA
+        id: vars
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+
+  security-scan:
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-security-scan.yml@main
+    secrets: inherit
+
+  build-and-push:
+    needs: [setup, security-scan]
+    strategy:
+      matrix:
+        service:
+          - frontend
+          - ai-rca-service
+          - api-gateway-service
+          - auth-service
+          - aws-intelligence-service
+          - azure-intelligence-service
+          - github-intelligence-service
+          - notification-service
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build-push.yml@main
+    secrets: inherit
+    with:
+      image-name: resolveops-${{ matrix.service }}
+      context-path: ${{ matrix.service == 'frontend' && './frontend' || format('./services/{0}', matrix.service) }}
+      acr-login-server: ${{ vars.ACR_LOGIN_SERVER }}
+      image-tag: app-${{ needs.setup.outputs.short_sha }}

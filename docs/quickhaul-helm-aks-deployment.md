@@ -176,8 +176,8 @@ helm lint quickhaul/helm/quickhaul
 
 ## Secrets Setup
 
-The chart does **not** create secrets automatically (to avoid committing credentials).
-Create namespaces and secrets before running `helm install`.
+The chart manages MongoDB credentials via a Helm Secret (using `values.yaml` placeholders) or an `existingSecret`. However, the **JWT secret** must still be created manually.
+Create namespaces and the JWT secret before running `helm install`.
 
 ### Step 1 — Ensure namespaces exist (idempotent)
 
@@ -209,10 +209,9 @@ kubectl create secret generic quickhaul-prod-secrets \
   --from-literal=SECRET_KEY='<your-prod-secret-key>'
 ```
 
-> **Note on MongoDB and Redis passwords:** `MONGO_PASSWORD` and `REDIS_PASSWORD` are
-> **not required** for the default in-cluster demo deployment because MongoDB and Redis
-> run without authentication enabled. Only add these if you explicitly enable
-> authentication in `values.yaml`.
+> **Note on MongoDB Passwords:** If you set a custom `mongodb.auth.password`, it is injected into the connection string `MONGO_URI`. You must ensure that the password is **URI-safe or URL-encoded** to avoid breaking the connection string format.
+>
+> **Note on Redis passwords:** `REDIS_PASSWORD` is **not required** for the default in-cluster demo deployment because Redis runs without authentication enabled. Only add this if you explicitly enable authentication in `values.yaml`.
 
 See `quickhaul/helm/quickhaul/templates/secrets.example.yaml` for the full Secret spec.
 

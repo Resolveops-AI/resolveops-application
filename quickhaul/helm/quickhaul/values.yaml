@@ -8,6 +8,8 @@ global:
   imageRegistry: ""   # e.g. myacr.azurecr.io — prefix applied to all images when set
   imagePullSecrets: []
 
+namespaceOverride: ""
+
 # ── MongoDB ───────────────────────────────────────────────────
 mongodb:
   enabled: true
@@ -16,11 +18,18 @@ mongodb:
     tag: "7.0"
     pullPolicy: IfNotPresent
   replicaCount: 1
-  port: 27017
+  service:
+    port: 27017
+  auth:
+    enabled: true
+    username: quickhaul
+    password: change-me
+    database: quickhaul
+    existingSecret: ""
   persistence:
     enabled: true
     size: 2Gi
-    storageClass: ""
+    storageClassName: ""
   resources:
     requests:
       cpu: 100m
@@ -54,8 +63,7 @@ redis:
 frontend:
   enabled: true
   image:
-    repository: sathvik2003/quickhaul-frontend
-    tag: "v9"
+    repository: quickhaul-frontend
     pullPolicy: IfNotPresent
   replicaCount: 1
   port: 80
@@ -74,8 +82,7 @@ frontend:
 locationService:
   enabled: true
   image:
-    repository: sathvik2003/quickhaul-location
-    tag: "v6"
+    repository: quickhaul-location
     pullPolicy: IfNotPresent
   replicaCount: 1
   containerPort: 8001
@@ -90,8 +97,7 @@ locationService:
 authService:
   enabled: true
   image:
-    repository: sathvik2003/quickhaul-auth
-    tag: "v6"
+    repository: quickhaul-auth
     pullPolicy: IfNotPresent
   replicaCount: 1
   containerPort: 8002
@@ -106,8 +112,7 @@ authService:
 bookingService:
   enabled: true
   image:
-    repository: sathvik2003/quickhaul-booking
-    tag: "v6"
+    repository: quickhaul-booking
     pullPolicy: IfNotPresent
   replicaCount: 1
   containerPort: 8003
@@ -122,8 +127,7 @@ bookingService:
 notificationService:
   enabled: true
   image:
-    repository: sathvik2003/quickhaul-notification
-    tag: "v6"
+    repository: quickhaul-notification
     pullPolicy: IfNotPresent
   replicaCount: 1
   containerPort: 8004
@@ -138,8 +142,7 @@ notificationService:
 otpService:
   enabled: true
   image:
-    repository: sathvik2003/quickhaul-otp
-    tag: "v6"
+    repository: quickhaul-otp
     pullPolicy: IfNotPresent
   replicaCount: 1
   containerPort: 8005
@@ -154,8 +157,7 @@ otpService:
 paymentService:
   enabled: true
   image:
-    repository: sathvik2003/quickhaul-payment
-    tag: "v6"
+    repository: quickhaul-payment
     pullPolicy: IfNotPresent
   replicaCount: 1
   containerPort: 8006

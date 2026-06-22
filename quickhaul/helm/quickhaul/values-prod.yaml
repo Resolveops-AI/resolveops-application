@@ -1,26 +1,47 @@
-# ──────────────────────────────────────────────────────────────
-# values-prod.yaml — QuickHaul PROD overrides
-# Target namespace: quickhaul-prod
-# Slightly higher replicas, ingress TLS-ready, larger resources
-# ──────────────────────────────────────────────────────────────
-
+namespaceOverride: quickhaul-prod
+replicaCount: 2
+global:
+  imageRegistry: <ACR_LOGIN_SERVER>
+frontend:
+  image:
+    tag: v0.0.0
+  replicaCount: 2
+locationService:
+  image:
+    tag: v0.0.0
+  replicaCount: 2
+authService:
+  image:
+    tag: v0.0.0
+  replicaCount: 2
+bookingService:
+  image:
+    tag: v0.0.0
+  replicaCount: 2
+notificationService:
+  image:
+    tag: v0.0.0
+  replicaCount: 2
+otpService:
+  image:
+    tag: v0.0.0
+  replicaCount: 2
+paymentService:
+  image:
+    tag: v0.0.0
+  replicaCount: 2
 config:
-  mongoUri: "mongodb://quickhaul-mongodb:27017"
-  redisUrl: "redis://quickhaul-redis:6379/0"
-  frontendUrl: "https://quickhaul.sathvikdevops.site"
-
+  mongoUri: mongodb://quickhaul-mongodb:27017
+  redisUrl: redis://quickhaul-redis:6379/0
+  frontendUrl: https://quickhaul.sathvikdevops.site
 mongodb:
+  auth:
+    username: quickhaul
+    password: change-me-prod
+    database: quickhaul_prod
   persistence:
     enabled: true
-    size: 5Gi
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: 1000m
-      memory: 1Gi
-
+    size: 8Gi
 redis:
   persistence:
     enabled: true
@@ -32,33 +53,17 @@ redis:
     limits:
       cpu: 500m
       memory: 256Mi
-
-frontend:
-  replicaCount: 2
-
-locationService:
-  replicaCount: 2
-
-authService:
-  replicaCount: 2
-
-bookingService:
-  replicaCount: 2
-
-notificationService:
-  replicaCount: 2
-
-otpService:
-  replicaCount: 2
-
-paymentService:
-  replicaCount: 2
-
 ingress:
   enabled: true
-  className: "azure/application-gateway"
-  host: "quickhaul.sathvikdevops.site"
-
+  className: azure/application-gateway
+  host: quickhaul.sathvikdevops.site
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 700m
+    memory: 768Mi
 gatewayAPI:
   enabled: false
-  host: ""
+  host: ''

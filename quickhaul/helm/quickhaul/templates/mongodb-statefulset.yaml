@@ -1,0 +1,80 @@
+{{- if .Values.mongodb.enabled -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: quickhaul-mongodb
+  namespace: {{ .Values.namespaceOverride | default .Release.Namespace }}
+  labels:
+    {{- include "quickhaul.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb
+spec:
+  serviceName: quickhaul-mongodb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quickhaul-mongodb
+  template:
+    metadata:
+      labels:
+        app: quickhaul-mongodb
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: mongodb
+          image: {{ include "quickhaul.image" (dict "registry" .Values.global.imageRegistry "image" .Values.mongodb.image) }}
+          imagePullPolicy: {{ .Values.mongodb.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: mongo
+              containerPort: {{ .Values.mongodb.service.port }}
+              protocol: TCP
+          {{- if .Values.mongodb.auth.enabled }}
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "quickhaul.mongodbSecretName" . }}
+                  key: username
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "quickhaul.mongodbSecretName" . }}
+                  key: password
+            - name: MONGO_INITDB_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "quickhaul.mongodbSecretName" . }}
+                  key: database
+          {{- end }}
+          resources:
+            {{- toYaml .Values.mongodb.resources | nindent 12 }}
+          securityContext:
+            runAsUser: 999
+            runAsGroup: 999
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.mongodb.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.mongodb.service.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+      volumes:
+        - name: data
+          {{- if .Values.mongodb.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: quickhaul-mongodb-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

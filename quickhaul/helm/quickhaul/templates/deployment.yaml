@@ -18,7 +18,7 @@ spec:
       labels:
         {{- include "quickhaul.selectorLabels" (dict "root" . "component" "frontend") | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "quickhaul.fullname" . }}
+      serviceAccountName: {{ include "quickhaul.serviceAccountName" . }}
       securityContext:
         fsGroup: 101
       {{- with .Values.global.imagePullSecrets }}
@@ -88,7 +88,7 @@ spec:
       labels:
         {{- include "quickhaul.selectorLabels" (dict "root" $root "component" $svc.component) | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "quickhaul.fullname" $root }}
+      serviceAccountName: {{ include "quickhaul.serviceAccountName" $root }}
       securityContext:
         fsGroup: 10001
       {{- with $root.Values.global.imagePullSecrets }}
@@ -106,6 +106,30 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "quickhaul.configmapName" $root }}
+          {{- if $root.Values.mongodb.enabled }}
+          env:
+            - name: MONGO_HOST
+              value: "quickhaul-mongodb"
+            - name: MONGO_PORT
+              value: {{ $root.Values.mongodb.service.port | quote }}
+            - name: MONGO_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "quickhaul.mongodbSecretName" $root }}
+                  key: username
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "quickhaul.mongodbSecretName" $root }}
+                  key: password
+            - name: MONGO_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "quickhaul.mongodbSecretName" $root }}
+                  key: database
+            - name: MONGO_URI
+              value: "mongodb://$(MONGO_USERNAME):$(MONGO_PASSWORD)@$(MONGO_HOST).{{ $root.Values.namespaceOverride | default $root.Release.Namespace }}.svc.cluster.local:$(MONGO_PORT)/$(MONGO_DATABASE)"
+          {{- end }}
           resources:
             {{- toYaml $vals.resources | nindent 12 }}
           securityContext:

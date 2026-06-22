@@ -88,3 +88,25 @@ Redis service hostname.
 {{- define "quickhaul.redisHost" -}}
 {{- printf "%s-redis" (include "quickhaul.fullname" .) }}
 {{- end }}
+
+{{/*
+Create the name of the service account to use
+*/}}
+{{- define "quickhaul.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "quickhaul.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{/*
+Get the MongoDB secret name.
+*/}}
+{{- define "quickhaul.mongodbSecretName" -}}
+{{- if .Values.mongodb.auth.existingSecret -}}
+{{- .Values.mongodb.auth.existingSecret -}}
+{{- else -}}
+{{- printf "%s-mongodb" (include "quickhaul.fullname" .) -}}
+{{- end -}}
+{{- end }}

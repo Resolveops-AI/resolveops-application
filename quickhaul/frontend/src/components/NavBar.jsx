@@ -6,7 +6,7 @@ function NavBar() {
 
   return (
     <nav className="navbar">
-      <h2>Transport Booking</h2>
+      <h2>QuickHaul Booking (ArgoCD Demo)</h2>
       <div className="nav-links">
         <Link to="/">Booking</Link>
         <Link to="/history">History</Link>

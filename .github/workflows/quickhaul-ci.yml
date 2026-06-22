@@ -75,10 +75,12 @@ jobs:
     uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
     secrets: inherit
     with:
-      image-name: quickhaul-${{ matrix.service }}
-      context-path: ${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
-      acr-login-server: resolveopsacr03.azurecr.io
-      image-tag: ${{ needs.setup.outputs.dev_image_tag }}
+      image_name: quickhaul-${{ matrix.service }}
+      context_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
+      dockerfile_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend/Dockerfile' || './quickhaul/backend/Dockerfile' }}
+      acr_name: resolveopsacr03
+      acr_login_server: resolveopsacr03.azurecr.io
+      image_tag: ${{ needs.setup.outputs.dev_image_tag }}
 
   update-dev-helm:
     if: github.event_name == 'pull_request'
@@ -115,10 +117,12 @@ jobs:
     uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
     secrets: inherit
     with:
-      image-name: quickhaul-${{ matrix.service }}
-      context-path: ${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
-      acr-login-server: resolveopsacr03.azurecr.io
-      image-tag: ${{ needs.setup.outputs.candidate_tag }}
+      image_name: quickhaul-${{ matrix.service }}
+      context_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
+      dockerfile_path: ${{ matrix.service == 'frontend' && './quickhaul/frontend/Dockerfile' || './quickhaul/backend/Dockerfile' }}
+      acr_name: resolveopsacr03
+      acr_login_server: resolveopsacr03.azurecr.io
+      image_tag: ${{ needs.setup.outputs.candidate_tag }}
 
   calculate-semver:
     if: github.event_name == 'push'

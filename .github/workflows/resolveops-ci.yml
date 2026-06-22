@@ -60,10 +60,12 @@ jobs:
     uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
     secrets: inherit
     with:
-      image-name: resolveops-ai
-      context-path: ./resolveops-ai
-      acr-login-server: resolveopsacr03.azurecr.io
-      image-tag: ${{ needs.setup.outputs.dev_image_tag }}
+      image_name: resolveops-ai
+      context_path: ./resolveops-ai
+      dockerfile_path: ./resolveops-ai/Dockerfile
+      acr_name: resolveopsacr03
+      acr_login_server: resolveopsacr03.azurecr.io
+      image_tag: ${{ needs.setup.outputs.dev_image_tag }}
 
   # ==========================================
   # MAIN FLOW (PROD IMAGES)
@@ -74,10 +76,12 @@ jobs:
     uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
     secrets: inherit
     with:
-      image-name: resolveops-ai
-      context-path: ./resolveops-ai
-      acr-login-server: resolveopsacr03.azurecr.io
-      image-tag: ${{ needs.setup.outputs.candidate_tag }}
+      image_name: resolveops-ai
+      context_path: ./resolveops-ai
+      dockerfile_path: ./resolveops-ai/Dockerfile
+      acr_name: resolveopsacr03
+      acr_login_server: resolveopsacr03.azurecr.io
+      image_tag: ${{ needs.setup.outputs.candidate_tag }}
 
   calculate-semver:
     if: github.event_name == 'push'

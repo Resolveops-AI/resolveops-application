@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - feature/dev
-      - main
     paths:
       - '.github/workflows/ci-quickhaul-otp.yml'
       - 'quickhaul/backend/services/otp_service/**'
@@ -17,11 +16,38 @@ on:
       - '.github/workflows/ci-quickhaul-otp.yml'
       - 'quickhaul/backend/services/otp_service/**'
       - 'quickhaul/backend/shared/**'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Semantic Version (e.g. v1.0.0)'
+        required: true
+        type: string
 permissions:
   contents: write
   id-token: write
 
 jobs:
+  get-tag:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.tag.outputs.TAG }}
+      environment: ${{ steps.tag.outputs.ENV }}
+    steps:
+      - id: tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            if [[ ! "${{ github.event.inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
+              echo "Error: version must be semver (e.g. v1.0.0)"
+              exit 1
+            fi
+            echo "TAG=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "ENV=main" >> $GITHUB_OUTPUT
+          else
+            echo "TAG=dev-$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+            echo "ENV=feature/dev" >> $GITHUB_OUTPUT
+          fi
+
   sast:
     if: github.event_name == 'pull_request'
     uses: Resolveops-AI/resolveops-templates/.github/workflows/_sast.yml@main
@@ -32,7 +58,7 @@ jobs:
       SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
   sca:
-    needs: [sast]
+    needs: [sast, get-tag]
     if: github.event_name == 'pull_request'
     uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
     with:
@@ -41,7 +67,7 @@ jobs:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
   build:
-    needs: [sast, sca]
+    needs: [sast, sca, get-tag]
     if: github.event_name == 'pull_request'
     uses: Resolveops-AI/resolveops-templates/.github/workflows/_docker-build.yml@main
     with:
@@ -50,7 +76,7 @@ jobs:
       dockerfile_path: quickhaul/backend/services/otp_service/Dockerfile
 
   publish:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     uses: Resolveops-AI/resolveops-templates/.github/workflows/_docker-publish.yml@main
     with:
       image_name: quickhaul-otp
@@ -58,20 +84,20 @@ jobs:
       dockerfile_path: quickhaul/backend/services/otp_service/Dockerfile
       acr_name: ${{ vars.ACR_NAME }}
       acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
-      image_tag: ${{ github.run_number }}
+      image_tag: ${{ needs.get-tag.outputs.image_tag }}
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
   cd:
-    needs: [publish]
-    if: always() && needs.publish.result == 'success' && (github.ref_name == 'feature/dev' || github.ref_name == 'main')
+    needs: [publish, get-tag]
+    if: always() && needs.publish.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     uses: Resolveops-AI/resolveops-templates/.github/workflows/_cd-template.yml@main
     with:
       service-name: quickhaul-otp
-      image-tag: ${{ github.run_number }}
-      environment: ${{ github.ref_name }}
+      image-tag: ${{ needs.get-tag.outputs.image_tag }}
+      environment: ${{ needs.get-tag.outputs.environment }}
       manifest_type: helm
       target_dir: quickhaul/helm/quickhaul
       update_key: .otpService.image.tag

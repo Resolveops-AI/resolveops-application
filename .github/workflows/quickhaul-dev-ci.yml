@@ -7,6 +7,12 @@ on:
     paths:
       - 'quickhaul/**'
       - '.github/workflows/quickhaul-dev-ci.yml'
+  workflow_dispatch:
+    inputs:
+      force_build_all:
+        description: 'Force full rebuild of ALL microservices (Initial Run)'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -36,40 +42,46 @@ jobs:
         id: detect
         run: |
           cat << 'EOF' > detect.py
-          import yaml, json, subprocess, fnmatch
+          import yaml, json, subprocess, fnmatch, os
           with open('.github/service-map/quickhaul-services.yml', 'r') as f:
               service_map = yaml.safe_load(f)
-          before = '${{ github.event.before }}'
-          sha = '${{ github.sha }}'
-          if before and before != '0000000000000000000000000000000000000000':
-              cmd = f"git diff --name-only {before} {sha}"
+          
+          force_all = '${{ github.event.inputs.force_build_all }}' == 'true'
+          
+          if force_all:
+              changed_services = list(service_map.values())
           else:
-              cmd = f"git diff --name-only HEAD^ HEAD"
-          try:
-              output = subprocess.check_output(cmd, shell=True, text=True)
-          except subprocess.CalledProcessError:
-              output = ""
-          changed_files = [line.strip() for line in output.strip().split('\n') if line.strip()]
-          
-          docs_only = all(f.endswith('.md') for f in changed_files if f)
-          shared_changed = any(f.startswith("quickhaul/backend/shared/") for f in changed_files)
-          
-          changed_services = []
-          if not docs_only:
-              for svc, details in service_map.items():
-                  if shared_changed and details['context_path'] == "quickhaul/backend":
-                      changed_services.append(details)
-                      continue
-                  changed = False
-                  for file in changed_files:
-                      for path in details['source_paths']:
-                          if fnmatch.fnmatch(file, path):
-                              changed = True
+              before = '${{ github.event.before }}'
+              sha = '${{ github.sha }}'
+              if before and before != '0000000000000000000000000000000000000000':
+                  cmd = f"git diff --name-only {before} {sha}"
+              else:
+                  cmd = f"git diff --name-only HEAD^ HEAD"
+              try:
+                  output = subprocess.check_output(cmd, shell=True, text=True)
+              except subprocess.CalledProcessError:
+                  output = ""
+              changed_files = [line.strip() for line in output.strip().split('\n') if line.strip()]
+              
+              docs_only = all(f.endswith('.md') for f in changed_files if f)
+              shared_changed = any(f.startswith("quickhaul/backend/shared/") for f in changed_files)
+              
+              changed_services = []
+              if not docs_only:
+                  for svc, details in service_map.items():
+                      if shared_changed and details['context_path'] == "quickhaul/backend":
+                          changed_services.append(details)
+                          continue
+                      changed = False
+                      for file in changed_files:
+                          for path in details['source_paths']:
+                              if fnmatch.fnmatch(file, path):
+                                  changed = True
+                                  break
+                          if changed:
                               break
                       if changed:
-                          break
-                  if changed:
-                      changed_services.append(details)
+                          changed_services.append(details)
           
           with open('output.json', 'w') as f:
               json.dump(changed_services, f)

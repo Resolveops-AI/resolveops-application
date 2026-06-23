@@ -59,4 +59,3 @@ resources:
 gatewayAPI:
   enabled: false
   host: ''
-nodeSelector: null

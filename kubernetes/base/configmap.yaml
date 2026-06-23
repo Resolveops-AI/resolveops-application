@@ -12,3 +12,5 @@ data:
   AI_RCA_SERVICE_URL: "http://ai-rca-service:8000"
   NOTIFICATION_SERVICE_URL: "http://notification-service:8000"
   NEXT_PUBLIC_API_BASE_URL: "/api"
+  STORAGE_ACCOUNT_NAME: ""
+  BLOB_CONTAINER_NAME: "artifacts"

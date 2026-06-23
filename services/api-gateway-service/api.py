@@ -26,6 +26,8 @@ from database import (
 )
 import notifications
 from predictive_engine import PredictiveEngine
+from pg_database import init_pg_db, get_db, Artifact
+from storage import init_storage, upload_artifact_blob, download_artifact_blob
 
 # Initialize Predictive Engine
 predictive_engine = PredictiveEngine()
@@ -35,6 +37,10 @@ try:
     init_dynamodb()
 except Exception as e:
     print("Warning: Could not initialize DynamoDB tables (are AWS credentials set?):", e)
+
+# Initialize PostgreSQL and Blob Storage
+init_pg_db()
+init_storage()
 
 app = FastAPI(
     title="NexusAI SaaS API",
@@ -2640,6 +2646,112 @@ async def proxy_aws_requests(path: str, request: Request, current_user: dict = D
             )
         except httpx.RequestError as e:
             raise HTTPException(status_code=502, detail=f"Failed to communicate with AWS intelligence service: {str(e)}")
+
+# --- Artifacts Management ---
+
+class ArtifactResponse(BaseModel):
+    id: str
+    tenant_id: str
+    artifact_type: str
+    file_name: str
+    content_type: str
+    created_at: datetime.datetime
+    status: str
+
+    class Config:
+        from_attributes = True
+
+@app.post("/api/v1/artifacts/architecture", response_model=ArtifactResponse)
+def generate_architecture_artifact(current_user: dict = Depends(get_current_user), db = Depends(get_db)):
+    """Generates a sample architecture diagram, uploads to Blob Storage, and saves metadata."""
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    
+    tenant_id = current_user.get("user_id")
+    artifact_id = str(uuid.uuid4())
+    file_name = f"architecture_{artifact_id[:8]}.svg"
+    content_type = "image/svg+xml"
+    
+    # Dummy SVG generation for demonstration
+    svg_content = f'''<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+        <rect width="100%" height="100%" fill="lightblue"/>
+        <text x="50%" y="50%" font-size="20" text-anchor="middle" alignment-baseline="middle">NexusAI Architecture</text>
+    </svg>'''.encode('utf-8')
+    
+    try:
+        blob_path = upload_artifact_blob(
+            tenant_id=tenant_id,
+            artifact_type="architecture",
+            artifact_id=artifact_id,
+            file_name=file_name,
+            content=svg_content,
+            content_type=content_type
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload to Blob Storage: {e}")
+
+    # Save to PostgreSQL
+    new_artifact = Artifact(
+        id=artifact_id,
+        tenant_id=tenant_id,
+        artifact_type="architecture",
+        blob_container=os.getenv("BLOB_CONTAINER_NAME", "artifacts"),
+        blob_path=blob_path,
+        file_name=file_name,
+        content_type=content_type,
+        status="READY"
+    )
+    
+    db.add(new_artifact)
+    db.commit()
+    db.refresh(new_artifact)
+    
+    return new_artifact
+
+@app.get("/api/v1/artifacts", response_model=List[ArtifactResponse])
+def list_artifacts(current_user: dict = Depends(get_current_user), db = Depends(get_db)):
+    """Lists all artifacts for the current tenant."""
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+        
+    tenant_id = current_user.get("user_id")
+    artifacts = db.query(Artifact).filter(Artifact.tenant_id == tenant_id).order_by(Artifact.created_at.desc()).all()
+    return artifacts
+
+@app.get("/api/v1/artifacts/{id}", response_model=ArtifactResponse)
+def get_artifact(id: str, current_user: dict = Depends(get_current_user), db = Depends(get_db)):
+    """Retrieves artifact metadata by ID."""
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+        
+    tenant_id = current_user.get("user_id")
+    artifact = db.query(Artifact).filter(Artifact.id == id, Artifact.tenant_id == tenant_id).first()
+    
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+        
+    return artifact
+
+@app.get("/api/v1/artifacts/{id}/download")
+def download_artifact(id: str, current_user: dict = Depends(get_current_user), db = Depends(get_db)):
+    """Downloads the actual artifact file from Blob Storage."""
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+        
+    tenant_id = current_user.get("user_id")
+    artifact = db.query(Artifact).filter(Artifact.id == id, Artifact.tenant_id == tenant_id).first()
+    
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+        
+    try:
+        from fastapi.responses import Response
+        content = download_artifact_blob(artifact.blob_path)
+        return Response(content=content, media_type=artifact.content_type, headers={
+            "Content-Disposition": f"attachment; filename={artifact.file_name}"
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download artifact: {e}")
 
 if __name__ == "__main__":
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)

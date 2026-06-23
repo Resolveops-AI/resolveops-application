@@ -189,9 +189,45 @@ config:
   otpApiUrl: "/api/otp"
   paymentApiUrl: "/api/payments"
 
+# ── Secret references (do NOT put real values here) ───────────
+# These keys must exist in a pre-created Kubernetes Secret named
+# <release>-secrets  (see templates/secrets.example.yaml)
+#
+# SECRET_KEY  — maps to shared/config.py `secret_key` (used for JWT signing)
+# MONGO_PASSWORD / REDIS_PASSWORD — only required if auth is enabled on those services.
+#   For the default in-cluster demo mode they are not required.
+secretKeys:
+  secretKey: SECRET_KEY
+  mongoPassword: MONGO_PASSWORD
+  redisPassword: REDIS_PASSWORD
 
-# ── Node Scheduling ───────────────────────────────────────────
-# Target the AKS user node pool for all application workloads.
-# The system node pool is protected with CriticalAddonsOnly=true:NoSchedule.
-nodeSelector:
-  kubernetes.azure.com/mode: user
+# ── Ingress ───────────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: ""           # e.g. "azure/application-gateway" or "nginx"
+  annotations: {}
+  # azure-agic example:
+  # kubernetes.io/ingress.class: azure/application-gateway
+  # appgw.ingress.kubernetes.io/ssl-redirect: "true"
+  host: ""               # e.g. quickhaul-dev.example.com
+  tls: []
+  # - secretName: quickhaul-tls
+  #   hosts:
+  #     - quickhaul-dev.example.com
+
+# ── Service Account ───────────────────────────────────────────
+serviceAccount:
+  create: false
+  name: ""
+
+# ── Gateway API ───────────────────────────────────────────────
+gatewayAPI:
+  enabled: false
+  className: "kong"
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m

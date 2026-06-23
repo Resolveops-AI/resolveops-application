@@ -12,6 +12,9 @@ spec:
     helm:
       valueFiles:
       - values-dev.yaml
+      parameters:
+      - name: global.imageRegistry
+        value: resolveopsacr05.azurecr.io
   destination:
     server: https://kubernetes.default.svc
     namespace: quickhaul-dev

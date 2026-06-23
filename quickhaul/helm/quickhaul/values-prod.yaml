@@ -1,7 +1,7 @@
 namespaceOverride: quickhaul-prod
 replicaCount: 2
 global:
-  imageRegistry: resolveopsacr05.azurecr.io
+  imageRegistry: ""  # injected via ArgoCD helm.parameters — do not hardcode here
 frontend:
   image:
     tag: v0.0.0

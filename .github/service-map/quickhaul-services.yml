@@ -1,0 +1,75 @@
+quickhaul-frontend:
+  service_name: quickhaul-frontend
+  source_paths:
+    - "quickhaul/frontend/**"
+  dockerfile_path: "quickhaul/frontend/Dockerfile"
+  context_path: "quickhaul/frontend"
+  image_name: "quickhaul-frontend"
+  helm_values_tag_key: ".frontend.image.tag"
+  app_group: "quickhaul"
+
+quickhaul-auth:
+  service_name: quickhaul-auth
+  source_paths:
+    - "quickhaul/backend/services/auth_service/**"
+    - "quickhaul/backend/shared/**"
+  dockerfile_path: "quickhaul/backend/services/auth_service/Dockerfile"
+  context_path: "quickhaul/backend"
+  image_name: "quickhaul-auth"
+  helm_values_tag_key: ".authService.image.tag"
+  app_group: "quickhaul"
+
+quickhaul-booking:
+  service_name: quickhaul-booking
+  source_paths:
+    - "quickhaul/backend/services/booking_service/**"
+    - "quickhaul/backend/shared/**"
+  dockerfile_path: "quickhaul/backend/services/booking_service/Dockerfile"
+  context_path: "quickhaul/backend"
+  image_name: "quickhaul-booking"
+  helm_values_tag_key: ".bookingService.image.tag"
+  app_group: "quickhaul"
+
+quickhaul-location:
+  service_name: quickhaul-location
+  source_paths:
+    - "quickhaul/backend/services/location_service/**"
+    - "quickhaul/backend/shared/**"
+  dockerfile_path: "quickhaul/backend/services/location_service/Dockerfile"
+  context_path: "quickhaul/backend"
+  image_name: "quickhaul-location"
+  helm_values_tag_key: ".locationService.image.tag"
+  app_group: "quickhaul"
+
+quickhaul-notification:
+  service_name: quickhaul-notification
+  source_paths:
+    - "quickhaul/backend/services/notification_service/**"
+    - "quickhaul/backend/shared/**"
+  dockerfile_path: "quickhaul/backend/services/notification_service/Dockerfile"
+  context_path: "quickhaul/backend"
+  image_name: "quickhaul-notification"
+  helm_values_tag_key: ".notificationService.image.tag"
+  app_group: "quickhaul"
+
+quickhaul-otp:
+  service_name: quickhaul-otp
+  source_paths:
+    - "quickhaul/backend/services/otp_service/**"
+    - "quickhaul/backend/shared/**"
+  dockerfile_path: "quickhaul/backend/services/otp_service/Dockerfile"
+  context_path: "quickhaul/backend"
+  image_name: "quickhaul-otp"
+  helm_values_tag_key: ".otpService.image.tag"
+  app_group: "quickhaul"
+
+quickhaul-payment:
+  service_name: quickhaul-payment
+  source_paths:
+    - "quickhaul/backend/services/payment_service/**"
+    - "quickhaul/backend/shared/**"
+  dockerfile_path: "quickhaul/backend/services/payment_service/Dockerfile"
+  context_path: "quickhaul/backend"
+  image_name: "quickhaul-payment"
+  helm_values_tag_key: ".paymentService.image.tag"
+  app_group: "quickhaul"

@@ -1,0 +1,71 @@
+resolveops-frontend:
+  service_name: resolveops-frontend
+  source_paths:
+    - "frontend/**"
+  dockerfile_path: "frontend/Dockerfile"
+  context_path: "frontend"
+  image_name: "frontend"
+  app_group: "resolveops"
+
+api-gateway-service:
+  service_name: api-gateway-service
+  source_paths:
+    - "services/api-gateway-service/**"
+  dockerfile_path: "services/api-gateway-service/Dockerfile"
+  context_path: "services/api-gateway-service"
+  image_name: "api-gateway-service"
+  app_group: "resolveops"
+
+auth-service:
+  service_name: auth-service
+  source_paths:
+    - "services/auth-service/**"
+  dockerfile_path: "services/auth-service/Dockerfile"
+  context_path: "services/auth-service"
+  image_name: "auth-service"
+  app_group: "resolveops"
+
+github-intelligence-service:
+  service_name: github-intelligence-service
+  source_paths:
+    - "services/github-intelligence-service/**"
+  dockerfile_path: "services/github-intelligence-service/Dockerfile"
+  context_path: "services/github-intelligence-service"
+  image_name: "github-intelligence-service"
+  app_group: "resolveops"
+
+azure-intelligence-service:
+  service_name: azure-intelligence-service
+  source_paths:
+    - "services/azure-intelligence-service/**"
+  dockerfile_path: "services/azure-intelligence-service/Dockerfile"
+  context_path: "services/azure-intelligence-service"
+  image_name: "azure-intelligence-service"
+  app_group: "resolveops"
+
+aws-intelligence-service:
+  service_name: aws-intelligence-service
+  source_paths:
+    - "services/aws-intelligence-service/**"
+  dockerfile_path: "services/aws-intelligence-service/Dockerfile"
+  context_path: "services/aws-intelligence-service"
+  image_name: "aws-intelligence-service"
+  app_group: "resolveops"
+
+ai-rca-service:
+  service_name: ai-rca-service
+  source_paths:
+    - "services/ai-rca-service/**"
+  dockerfile_path: "services/ai-rca-service/Dockerfile"
+  context_path: "services/ai-rca-service"
+  image_name: "ai-rca-service"
+  app_group: "resolveops"
+
+notification-service:
+  service_name: notification-service
+  source_paths:
+    - "services/notification-service/**"
+  dockerfile_path: "services/notification-service/Dockerfile"
+  context_path: "services/notification-service"
+  image_name: "notification-service"
+  app_group: "resolveops"

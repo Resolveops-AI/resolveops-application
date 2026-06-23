@@ -32,7 +32,6 @@ jobs:
     outputs:
       short_sha: ${{ steps.vars.outputs.short_sha }}
       dev_image_tag: ${{ steps.vars.outputs.dev_image_tag }}
-      candidate_tag: ${{ steps.vars.outputs.candidate_tag }}
     steps:
       - name: Calculate Variables
         id: vars
@@ -42,10 +41,8 @@ jobs:
           
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             echo "dev_image_tag=dev-pr-${{ github.event.pull_request.number }}-$SHORT_SHA" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-            echo "dev_image_tag=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
           else
-            echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
+            echo "dev_image_tag=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
           fi
 
   detect-changed-services:
@@ -61,7 +58,7 @@ jobs:
         id: detect
         run: |
           cat << 'EOF' > detect.py
-          import yaml, json, subprocess, fnmatch, sys
+          import yaml, json, subprocess, fnmatch
           with open('.github/service-map/quickhaul-services.yml', 'r') as f:
               service_map = yaml.safe_load(f)
           event_name = '${{ github.event_name }}'
@@ -82,7 +79,8 @@ jobs:
               output = ""
           changed_files = [line.strip() for line in output.strip().split('\n') if line.strip()]
           
-          # Check for shared code changes
+          docs_only = all(f.endswith('.md') for f in changed_files if f)
+          
           shared_changed = False
           for file in changed_files:
               if file.startswith("quickhaul/backend/shared/"):
@@ -90,20 +88,22 @@ jobs:
                   break
                   
           changed_services = []
-          for svc, details in service_map.items():
-              if shared_changed and details['context_path'] == "quickhaul/backend":
-                  changed_services.append(details)
-                  continue
-              changed = False
-              for file in changed_files:
-                  for path in details['source_paths']:
-                      if fnmatch.fnmatch(file, path):
-                          changed = True
+          if not docs_only:
+              for svc, details in service_map.items():
+                  if shared_changed and details['context_path'] == "quickhaul/backend":
+                      changed_services.append(details)
+                      continue
+                  changed = False
+                  for file in changed_files:
+                      for path in details['source_paths']:
+                          if fnmatch.fnmatch(file, path):
+                              changed = True
+                              break
+                      if changed:
                           break
                   if changed:
-                      break
-              if changed:
-                  changed_services.append(details)
+                      changed_services.append(details)
+          
           with open('output.json', 'w') as f:
               json.dump(changed_services, f)
           EOF
@@ -116,8 +116,13 @@ jobs:
           else
              echo "skip_build=false" >> $GITHUB_OUTPUT
           fi
-          echo "Changed services:"
-          echo "$JSON_OUT" | jq .
+
+  lint-testing:
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Running generic linting for changed services"
 
   sast-sonar-scan:
     needs: [detect-changed-services]
@@ -148,6 +153,8 @@ jobs:
       run_trivy: false
 
   helm-validation:
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -159,11 +166,36 @@ jobs:
         run: helm template quickhaul-prod quickhaul/helm/quickhaul -n quickhaul-prod -f quickhaul/helm/quickhaul/values-prod.yaml
 
   # ==========================================
+  # PR FLOW ONLY (NO PUSH)
+  # ==========================================
+  build-temp-images:
+    if: github.event_name == 'pull_request'
+    needs: [setup, detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan, helm-validation]
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Temporary Docker Image
+        run: |
+          docker build -t temp-image:${{ needs.setup.outputs.dev_image_tag }} -f ${{ matrix.service.dockerfile_path }} ${{ matrix.service.context_path }}
+      - name: Run Trivy Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "temp-image:${{ needs.setup.outputs.dev_image_tag }}"
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
+
+  # ==========================================
   # DEV FLOW (PUSH TO DEV)
   # ==========================================
   build-dev-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [setup, detect-changed-services, sast-sonar-scan, sca-snyk-scan, helm-validation]
+    needs: [setup, detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan, helm-validation]
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -180,18 +212,28 @@ jobs:
   update-dev-helm:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     needs: [setup, detect-changed-services, build-dev-images]
-    strategy:
-      matrix:
-        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
-      max-parallel: 1
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/helm-updater-template.yml@main
-    secrets: inherit
-    with:
-      values_file: "quickhaul/helm/quickhaul/values-dev.yaml"
-      image_tag_key: ${{ matrix.service.helm_values_tag_key }}
-      image_tag: ${{ needs.setup.outputs.dev_image_tag }}
-      branch_name: "dev"
-      commit_message: "chore: update ${{ matrix.service.image_name }} dev tag [skip ci]"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+      - name: Update values-dev.yaml
+        run: |
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          DEV_TAG="${{ needs.setup.outputs.dev_image_tag }}"
+          
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            yq e "${KEY} = \"${DEV_TAG}\"" -i quickhaul/helm/quickhaul/values-dev.yaml
+          done
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add quickhaul/helm/quickhaul/values-dev.yaml
+          git commit -m "chore: update quickhaul dev image tags [skip ci]" || echo "No changes to commit"
+          git push origin dev
 
   sync-argo-dev:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
@@ -206,7 +248,7 @@ jobs:
   # ==========================================
   calculate-semver:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [detect-changed-services, sast-sonar-scan, sca-snyk-scan, helm-validation]
+    needs: [detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan, helm-validation]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.semver.outputs.new_tag }}
@@ -223,9 +265,46 @@ jobs:
           default_bump: patch
           release_branches: main
 
+  validate-prod-candidates:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [detect-changed-services, calculate-semver]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+      - name: Pull Dev Images and Run Trivy
+        run: |
+          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            IMAGE_NAME=$(echo $row | jq -r '.image_name')
+            DEV_TAG=$(yq e "${KEY}" quickhaul/helm/quickhaul/values-dev.yaml)
+            
+            echo "Pulling $IMAGE_NAME:$DEV_TAG"
+            docker pull ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG
+            
+            echo "Running Trivy on $IMAGE_NAME:$DEV_TAG"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image \
+              --exit-code 1 --severity CRITICAL,HIGH ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG
+              
+            EXISTS=$(az acr repository show-tags -n ${{ env.ACR_NAME }} --repository $IMAGE_NAME --query "[?@ == '${VERSION}']" -o tsv)
+            if [ -n "$EXISTS" ]; then
+              echo "Error: Tag $VERSION already exists in ACR for $IMAGE_NAME!"
+              exit 1
+            fi
+          done
+
   prod-approval-gate:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [calculate-semver]
+    needs: [validate-prod-candidates]
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -233,7 +312,7 @@ jobs:
 
   release-prod-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [setup, detect-changed-services, calculate-semver, prod-approval-gate]
+    needs: [detect-changed-services, calculate-semver, prod-approval-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -246,59 +325,47 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Retag and Push Images
+      - name: Retag and Push Semantic Version
         run: |
           VERSION="${{ needs.calculate-semver.outputs.new_version }}"
           echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
           
-          # Read existing dev tags from values-dev.yaml
-          cat << 'EOF' > retag.py
-          import yaml, json, subprocess
-          with open('changed.json', 'r') as f:
-              changed = json.load(f)
-          with open('quickhaul/helm/quickhaul/values-dev.yaml', 'r') as f:
-              values = yaml.safe_load(f)
-              
-          for svc in changed:
-              key_parts = svc['helm_values_tag_key'].strip('.').split('.')
-              # traverse
-              current = values
-              for k in key_parts:
-                  if k in current:
-                      current = current[k]
-                  else:
-                      current = None
-                      break
-              if current:
-                  dev_tag = current
-                  print(f"Retagging {svc['image_name']} from {dev_tag} to {VERSION}")
-                  cmd = f"az acr import --name resolveopsacr03 --source resolveopsacr03.azurecr.io/{svc['image_name']}:{dev_tag} --image {svc['image_name']}:{VERSION}"
-                  subprocess.run(cmd, shell=True, check=True)
-          EOF
-          python3 retag.py
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            IMAGE_NAME=$(echo $row | jq -r '.image_name')
+            DEV_TAG=$(yq e "${KEY}" quickhaul/helm/quickhaul/values-dev.yaml)
+            
+            echo "Retagging $IMAGE_NAME from $DEV_TAG to $VERSION"
+            az acr import --name ${{ env.ACR_NAME }} \
+              --source ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG \
+              --image $IMAGE_NAME:$VERSION
+          done
 
   update-prod-helm:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [setup, detect-changed-services, calculate-semver, release-prod-images]
-    strategy:
-      matrix:
-        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
-      max-parallel: 1
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/helm-updater-template.yml@main
-    secrets: inherit
-    with:
-      values_file: "quickhaul/helm/quickhaul/values-prod.yaml"
-      image_tag_key: ${{ matrix.service.helm_values_tag_key }}
-      image_tag: ${{ needs.calculate-semver.outputs.new_version }}
-      branch_name: "main"
-      commit_message: "chore: update ${{ matrix.service.image_name }} prod tag [skip ci]"
-
-  create-git-tag:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [calculate-semver, update-prod-helm]
+    needs: [detect-changed-services, calculate-semver, release-prod-images]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Update values-prod.yaml
+        run: |
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            yq e "${KEY} = \"${VERSION}\"" -i quickhaul/helm/quickhaul/values-prod.yaml
+          done
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add quickhaul/helm/quickhaul/values-prod.yaml
+          git commit -m "chore: release quickhaul $VERSION [skip ci]" || echo "No changes to commit"
+          git push origin main
       - name: Create Git Tag
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -324,6 +391,15 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "detect-changed-services"
+
+  notify-lint-testing-failed:
+    needs: [lint-testing]
+    if: ${{ always() && needs.lint-testing.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "lint-testing"
 
   notify-sast-sonar-scan-failed:
     needs: [sast-sonar-scan]
@@ -352,6 +428,15 @@ jobs:
       service_name: "QuickHaul CI"
       failed_job_name: "helm-validation"
 
+  notify-build-temp-images-failed:
+    needs: [build-temp-images]
+    if: ${{ always() && needs.build-temp-images.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "build-temp-images"
+
   notify-build-dev-images-failed:
     needs: [build-dev-images]
     if: ${{ always() && needs.build-dev-images.result == 'failure' }}
@@ -369,6 +454,24 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "update-dev-helm"
+
+  notify-calculate-semver-failed:
+    needs: [calculate-semver]
+    if: ${{ always() && needs.calculate-semver.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "calculate-semver"
+
+  notify-validate-prod-candidates-failed:
+    needs: [validate-prod-candidates]
+    if: ${{ always() && needs.validate-prod-candidates.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "validate-prod-candidates"
 
   notify-release-prod-images-failed:
     needs: [release-prod-images]

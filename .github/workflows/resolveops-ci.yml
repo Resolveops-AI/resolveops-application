@@ -34,7 +34,6 @@ jobs:
     outputs:
       short_sha: ${{ steps.vars.outputs.short_sha }}
       dev_image_tag: ${{ steps.vars.outputs.dev_image_tag }}
-      candidate_tag: ${{ steps.vars.outputs.candidate_tag }}
     steps:
       - name: Calculate Variables
         id: vars
@@ -44,10 +43,8 @@ jobs:
           
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             echo "dev_image_tag=resolveops-pr-${{ github.event.pull_request.number }}-$SHORT_SHA" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-            echo "dev_image_tag=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
           else
-            echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
+            echo "dev_image_tag=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
           fi
 
   detect-changed-services:
@@ -63,7 +60,7 @@ jobs:
         id: detect
         run: |
           cat << 'EOF' > detect.py
-          import yaml, json, subprocess, fnmatch, sys
+          import yaml, json, subprocess, fnmatch
           with open('.github/service-map/resolveops-services.yml', 'r') as f:
               service_map = yaml.safe_load(f)
           event_name = '${{ github.event_name }}'
@@ -84,18 +81,22 @@ jobs:
               output = ""
           changed_files = [line.strip() for line in output.strip().split('\n') if line.strip()]
           
+          docs_only = all(f.endswith('.md') for f in changed_files if f)
+          
           changed_services = []
-          for svc, details in service_map.items():
-              changed = False
-              for file in changed_files:
-                  for path in details['source_paths']:
-                      if fnmatch.fnmatch(file, path):
-                          changed = True
+          if not docs_only:
+              for svc, details in service_map.items():
+                  changed = False
+                  for file in changed_files:
+                      for path in details['source_paths']:
+                          if fnmatch.fnmatch(file, path):
+                              changed = True
+                              break
+                      if changed:
                           break
                   if changed:
-                      break
-              if changed:
-                  changed_services.append(details)
+                      changed_services.append(details)
+          
           with open('output.json', 'w') as f:
               json.dump(changed_services, f)
           EOF
@@ -108,8 +109,13 @@ jobs:
           else
              echo "skip_build=false" >> $GITHUB_OUTPUT
           fi
-          echo "Changed services:"
-          echo "$JSON_OUT" | jq .
+
+  lint-testing:
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Running generic linting for changed services"
 
   sast-sonar-scan:
     needs: [detect-changed-services]
@@ -140,11 +146,36 @@ jobs:
       run_trivy: false
 
   # ==========================================
+  # PR FLOW ONLY (NO PUSH)
+  # ==========================================
+  build-temp-images:
+    if: github.event_name == 'pull_request'
+    needs: [setup, detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan]
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Temporary Docker Image
+        run: |
+          docker build -t temp-image:${{ needs.setup.outputs.dev_image_tag }} -f ${{ matrix.service.dockerfile_path }} ${{ matrix.service.context_path }}
+      - name: Run Trivy Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "temp-image:${{ needs.setup.outputs.dev_image_tag }}"
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
+
+  # ==========================================
   # DEV FLOW (PUSH TO DEV)
   # ==========================================
   build-dev-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [setup, detect-changed-services, sast-sonar-scan, sca-snyk-scan]
+    needs: [setup, detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan]
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -158,12 +189,14 @@ jobs:
       context_path: ${{ matrix.service.context_path }}
       image_tag: ${{ needs.setup.outputs.dev_image_tag }}
 
+  # Note: ResolveOps does not update QuickHaul Helm values or auto-deploy to AKS here
+
   # ==========================================
   # MAIN FLOW (PROD IMAGES)
   # ==========================================
   calculate-semver:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [detect-changed-services, sast-sonar-scan, sca-snyk-scan]
+    needs: [detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.semver.outputs.new_tag }}
@@ -180,21 +213,10 @@ jobs:
           default_bump: patch
           release_branches: main
 
-  prod-approval-gate:
+  validate-prod-candidates:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [calculate-semver]
+    needs: [detect-changed-services, calculate-semver]
     runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - run: echo "Production environment approved!"
-
-  release-prod-images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [setup, detect-changed-services, calculate-semver, prod-approval-gate]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Azure Login
@@ -203,35 +225,90 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Retag and Push Images
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+      - name: Pull Dev Images and Run Trivy
         run: |
           VERSION="${{ needs.calculate-semver.outputs.new_version }}"
           echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
           
-          cat << 'EOF' > retag.py
-          import json, subprocess
-          with open('changed.json', 'r') as f:
-              changed = json.load(f)
+          for row in $(jq -c '.[]' changed.json); do
+            IMAGE_NAME=$(echo $row | jq -r '.image_name')
+            
+            # Since ResolveOps doesn't have dev tags in values-dev.yaml to read from,
+            # we must infer the latest dev tag from ACR, or from the commit history.
+            # Assuming ResolveOps dev images are tagged with dev-<short-sha>.
+            # We'll use az acr repository show-tags to get the latest dev- tag.
+            DEV_TAG=$(az acr repository show-tags -n ${{ env.ACR_NAME }} --repository $IMAGE_NAME --query "[?starts_with(@, 'dev-')] | sort(@) | [-1]" -o tsv)
+            
+            if [ -z "$DEV_TAG" ]; then
+              echo "Error: Could not find dev tag for $IMAGE_NAME in ACR!"
+              exit 1
+            fi
+            
+            echo "Pulling $IMAGE_NAME:$DEV_TAG"
+            docker pull ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG
+            
+            echo "Running Trivy on $IMAGE_NAME:$DEV_TAG"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image \
+              --exit-code 1 --severity CRITICAL,HIGH ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG
               
-          for svc in changed:
-              # For ResolveOps, dev tags are not in values-dev.yaml, so we use the candidate tag or latest dev tag.
-              # Assuming standard dev build tags for dev pushes. Actually, if we just push to main,
-              # we might not have a values file. The prompt says "read source dev image tags from merged values-dev.yaml"
-              # but ResolveOps doesn't use helm values in this repo.
-              # Let's just use the candidate_tag for retagging.
-              candidate = "${{ needs.setup.outputs.candidate_tag }}"
-              print(f"Retagging {svc['image_name']} from {candidate} to {VERSION}")
-              cmd = f"az acr import --name resolveopsacr03 --source resolveopsacr03.azurecr.io/{svc['image_name']}:{candidate} --image {svc['image_name']}:{VERSION}"
-              subprocess.run(cmd, shell=True, check=True)
-          EOF
-          python3 retag.py
+            EXISTS=$(az acr repository show-tags -n ${{ env.ACR_NAME }} --repository $IMAGE_NAME --query "[?@ == '${VERSION}']" -o tsv)
+            if [ -n "$EXISTS" ]; then
+              echo "Error: Tag $VERSION already exists in ACR for $IMAGE_NAME!"
+              exit 1
+            fi
+            
+            # Save the DEV_TAG mapping for the next job
+            echo "$IMAGE_NAME=$DEV_TAG" >> dev_tags.env
+          done
+      - name: Upload dev tags mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev_tags
+          path: dev_tags.env
 
-  create-git-tag:
+  prod-approval-gate:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [calculate-semver, release-prod-images]
+    needs: [validate-prod-candidates]
     runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "Production environment approved!"
+
+  release-prod-images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [detect-changed-services, calculate-semver, prod-approval-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+      - name: Download dev tags mapping
+        uses: actions/download-artifact@v4
+        with:
+          name: dev_tags
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Retag and Push Semantic Version
+        run: |
+          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          
+          for row in $(jq -c '.[]' changed.json); do
+            IMAGE_NAME=$(echo $row | jq -r '.image_name')
+            DEV_TAG=$(grep "^${IMAGE_NAME}=" dev_tags.env | cut -d'=' -f2)
+            
+            echo "Retagging $IMAGE_NAME from $DEV_TAG to $VERSION"
+            az acr import --name ${{ env.ACR_NAME }} \
+              --source ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG \
+              --image $IMAGE_NAME:$VERSION
+          done
       - name: Create Git Tag
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -249,6 +326,15 @@ jobs:
     with:
       service_name: "ResolveOps CI"
       failed_job_name: "detect-changed-services"
+
+  notify-lint-testing-failed:
+    needs: [lint-testing]
+    if: ${{ always() && needs.lint-testing.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "ResolveOps CI"
+      failed_job_name: "lint-testing"
 
   notify-sast-sonar-scan-failed:
     needs: [sast-sonar-scan]
@@ -268,6 +354,15 @@ jobs:
       service_name: "ResolveOps CI"
       failed_job_name: "sca-snyk-scan"
 
+  notify-build-temp-images-failed:
+    needs: [build-temp-images]
+    if: ${{ always() && needs.build-temp-images.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "ResolveOps CI"
+      failed_job_name: "build-temp-images"
+
   notify-build-dev-images-failed:
     needs: [build-dev-images]
     if: ${{ always() && needs.build-dev-images.result == 'failure' }}
@@ -276,6 +371,24 @@ jobs:
     with:
       service_name: "ResolveOps CI"
       failed_job_name: "build-dev-images"
+
+  notify-calculate-semver-failed:
+    needs: [calculate-semver]
+    if: ${{ always() && needs.calculate-semver.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "ResolveOps CI"
+      failed_job_name: "calculate-semver"
+
+  notify-validate-prod-candidates-failed:
+    needs: [validate-prod-candidates]
+    if: ${{ always() && needs.validate-prod-candidates.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "ResolveOps CI"
+      failed_job_name: "validate-prod-candidates"
 
   notify-release-prod-images-failed:
     needs: [release-prod-images]

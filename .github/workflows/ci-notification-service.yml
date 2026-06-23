@@ -26,7 +26,6 @@ permissions:
 
 jobs:
   get-tag:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.tag.outputs.TAG }}
@@ -35,6 +34,10 @@ jobs:
       - id: tag
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            if [ "${{ github.ref_name }}" != "main" ]; then
+              echo "Error: Releases can only be triggered from the main branch."
+              exit 1
+            fi
             if [[ ! "${{ github.event.inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
               echo "Error: version must be semver (e.g. v1.0.0)"
               exit 1
@@ -74,6 +77,7 @@ jobs:
       dockerfile_path: services/notification-service/Dockerfile
 
   publish:
+    needs: [sast, sca, get-tag]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     uses: Resolveops-AI/resolveops-templates/.github/workflows/_docker-publish.yml@main
     with:
@@ -98,7 +102,7 @@ jobs:
       environment: ${{ needs.get-tag.outputs.environment }}
       manifest_type: kustomize
       target_dir: kubernetes/base
-      update_key: resolveopsacr05.azurecr.io/notification-service
+      update_key: ${{ vars.ACR_LOGIN_SERVER }}/notification-service
     secrets:
       HELM_REPO_PAT: ${{ secrets.HELM_REPO_PAT }}
 # trigger build

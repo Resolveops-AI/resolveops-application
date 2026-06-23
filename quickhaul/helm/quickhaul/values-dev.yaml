@@ -1,34 +1,34 @@
 namespaceOverride: quickhaul-dev
 replicaCount: 1
 global:
-  imageRegistry: ""  # injected via ArgoCD helm.parameter
+  imageRegistry: "" # injected via ArgoCD helm.parameter
 frontend:
   image:
-    tag: dev-0aa61b4
+    tag: v1.0.1
   replicaCount: 1
 locationService:
   image:
-    tag: dev-0aa61b4
+    tag: v1.0.1
   replicaCount: 1
 authService:
   image:
-    tag: dev-0aa61b4
+    tag: v1.0.1
   replicaCount: 1
 bookingService:
   image:
-    tag: dev-0aa61b4
+    tag: v1.0.1
   replicaCount: 1
 notificationService:
   image:
-    tag: dev-0aa61b4
+    tag: v1.0.1
   replicaCount: 1
 otpService:
   image:
-    tag: dev-0aa61b4
+    tag: v1.0.1
   replicaCount: 1
 paymentService:
   image:
-    tag: dev-0aa61b4
+    tag: v1.0.1
   replicaCount: 1
 config:
   mongoUri: mongodb://quickhaul-mongodb:27017

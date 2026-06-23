@@ -138,5 +138,5 @@ jobs:
       acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
       dockerfile_path: ${{ matrix.service.dockerfile_path }}
       context_path: ${{ matrix.service.context_path }}
-      image_tag: push-${{ needs.detect-changed-services.outputs.short_sha }}
+      image_tag: ${{ github.ref_name }}-${{ needs.detect-changed-services.outputs.short_sha }}
       push_image: true

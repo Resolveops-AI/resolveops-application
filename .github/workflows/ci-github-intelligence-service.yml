@@ -1,0 +1,77 @@
+name: CI/CD - github-intelligence-service
+
+on:
+  push:
+    branches:
+      - feature/dev
+      - main
+    paths:
+      - '.github/workflows\ci-github-intelligence-service.yml'
+      - 'services/github-intelligence-service/**'
+  pull_request:
+    branches:
+      - feature/dev
+      - main
+    paths:
+      - '.github/workflows\ci-github-intelligence-service.yml'
+      - 'services/github-intelligence-service/**'
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  sast:
+    if: github.event_name == 'pull_request'
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sast.yml@main
+    with:
+      working_directory: services/github-intelligence-service
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  sca:
+    needs: [sast]
+    if: github.event_name == 'pull_request'
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
+    with:
+      working_directory: services/github-intelligence-service
+    secrets:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  build:
+    needs: [sast, sca]
+    if: github.event_name == 'pull_request'
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_docker-build.yml@main
+    with:
+      image_name: github-intelligence-service
+      context_path: services/github-intelligence-service
+      dockerfile_path: services/github-intelligence-service/Dockerfile
+
+  publish:
+    if: github.event_name == 'push'
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_docker-publish.yml@main
+    with:
+      image_name: github-intelligence-service
+      context_path: services/github-intelligence-service
+      dockerfile_path: services/github-intelligence-service/Dockerfile
+      acr_name: ${{ vars.ACR_NAME }}
+      acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
+      image_tag: ${{ github.run_number }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  cd:
+    needs: [publish]
+    if: always() && needs.publish.result == 'success' && (github.ref_name == 'feature/dev' || github.ref_name == 'main')
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_cd-template.yml@main
+    with:
+      service-name: github-intelligence-service
+      image-tag: ${{ github.run_number }}
+      environment: ${{ github.ref_name }}
+      manifest_type: kustomize
+      target_dir: kubernetes/base
+      update_key: resolveopsacr05.azurecr.io/github-intelligence-service
+    secrets:
+      HELM_REPO_PAT: ${{ secrets.HELM_REPO_PAT }}

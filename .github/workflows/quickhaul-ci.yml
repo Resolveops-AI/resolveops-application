@@ -126,7 +126,7 @@ jobs:
       - run: echo "Running generic linting for changed services"
 
   sast-sonar-scan:
-    name: sast / SonarQube Analysis (${{ matrix.service.image_name }})
+    name: SonarQube Scan (${{ matrix.service.image_name }})
     needs: [detect-changed-services]
     if: needs.detect-changed-services.outputs.skip_build == 'false'
     strategy:
@@ -141,7 +141,7 @@ jobs:
       run_trivy: false
 
   sca-snyk-scan:
-    name: sca / Snyk Scan (${{ matrix.service.image_name }})
+    name: Snyk Scan (${{ matrix.service.image_name }})
     needs: [detect-changed-services, sast-sonar-scan]
     if: needs.detect-changed-services.outputs.skip_build == 'false'
     strategy:
@@ -173,9 +173,9 @@ jobs:
   # PR FLOW ONLY (NO PUSH)
   # ==========================================
   build-temp-images:
-    name: trivy / Build & Scan Image (${{ matrix.service.image_name }})
+    name: Build & Trivy Scan (${{ matrix.service.image_name }})
     if: github.event_name == 'pull_request'
-    needs: [setup, detect-changed-services, lint-testing, sca-snyk-scan, helm-validation]
+    needs: [setup, detect-changed-services, lint-testing, sca-snyk-scan]
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -207,9 +207,9 @@ jobs:
   # DEV FLOW (PUSH TO DEV)
   # ==========================================
   build-dev-images:
-    name: dev-publish / Build & Push Image (${{ matrix.service.image_name }})
+    name: Build & Push Dev (${{ matrix.service.image_name }})
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [setup, detect-changed-services, lint-testing, sca-snyk-scan, helm-validation]
+    needs: [setup, detect-changed-services, lint-testing, sca-snyk-scan]
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -263,7 +263,7 @@ jobs:
   # ==========================================
   calculate-semver:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [detect-changed-services, lint-testing, sca-snyk-scan, helm-validation]
+    needs: [detect-changed-services, lint-testing, sca-snyk-scan]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.semver.outputs.new_tag }}

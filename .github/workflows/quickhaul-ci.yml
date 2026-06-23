@@ -126,6 +126,7 @@ jobs:
       - run: echo "Running generic linting for changed services"
 
   sast-sonar-scan:
+    name: sast / SonarQube Analysis (${{ matrix.service.image_name }})
     needs: [detect-changed-services]
     if: needs.detect-changed-services.outputs.skip_build == 'false'
     strategy:
@@ -140,7 +141,8 @@ jobs:
       run_trivy: false
 
   sca-snyk-scan:
-    needs: [detect-changed-services]
+    name: sca / Snyk Scan (${{ matrix.service.image_name }})
+    needs: [sast-sonar-scan]
     if: needs.detect-changed-services.outputs.skip_build == 'false'
     strategy:
       matrix:
@@ -154,7 +156,8 @@ jobs:
       run_trivy: false
 
   helm-validation:
-    needs: [detect-changed-services]
+    name: helm / Validate Charts
+    needs: [sca-snyk-scan]
     if: needs.detect-changed-services.outputs.skip_build == 'false'
     runs-on: ubuntu-latest
     steps:
@@ -170,8 +173,9 @@ jobs:
   # PR FLOW ONLY (NO PUSH)
   # ==========================================
   build-temp-images:
-    if: github.event_name == 'pull_request'
-    needs: [setup, detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan, helm-validation]
+    name: trivy / Build & Scan Image (${{ matrix.service.image_name }})
+    if: github.event_name == \'pull_request\'
+    needs: [setup, lint-testing, sca-snyk-scan, helm-validation]
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -191,12 +195,21 @@ jobs:
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
 
+  pr-quality-gate:
+    name: PR Quality Gate
+    if: github.event_name == 'pull_request'
+    needs: [build-temp-images]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "All PR checks passed successfully!"
+
   # ==========================================
   # DEV FLOW (PUSH TO DEV)
   # ==========================================
   build-dev-images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [setup, detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan, helm-validation]
+    name: dev-publish / Build & Push Image (${{ matrix.service.image_name }})
+    if: github.event_name == \'push\' && github.ref == \'refs/heads/dev\'
+    needs: [setup, lint-testing, sca-snyk-scan, helm-validation]
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -249,8 +262,8 @@ jobs:
   # MAIN FLOW (PROD IMAGES)
   # ==========================================
   calculate-semver:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan, helm-validation]
+    if: github.event_name == \'push\' && github.ref == \'refs/heads/main\'
+    needs: [lint-testing, sca-snyk-scan, helm-validation]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.semver.outputs.new_tag }}
@@ -382,210 +395,4 @@ jobs:
     with:
       argocd_app_name: quickhaul-prod
       argocd_server: ${{ vars.ARGOCD_SERVER }}
-
-  # ==========================================
-  # NOTIFICATIONS
-  # ==========================================
-  notify-detect-changed-services-failed:
-    needs: [detect-changed-services]
-    if: ${{ always() && needs.detect-changed-services.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "detect-changed-services"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-lint-testing-failed:
-    needs: [lint-testing]
-    if: ${{ always() && needs.lint-testing.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "lint-testing"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-sast-sonar-scan-failed:
-    needs: [sast-sonar-scan]
-    if: ${{ always() && needs.sast-sonar-scan.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "sast-sonar-scan"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-sca-snyk-scan-failed:
-    needs: [sca-snyk-scan]
-    if: ${{ always() && needs.sca-snyk-scan.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "sca-snyk-scan"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-helm-validation-failed:
-    needs: [helm-validation]
-    if: ${{ always() && needs.helm-validation.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "helm-validation"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-build-temp-images-failed:
-    needs: [build-temp-images]
-    if: ${{ always() && needs.build-temp-images.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "build-temp-images"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-build-dev-images-failed:
-    needs: [build-dev-images]
-    if: ${{ always() && needs.build-dev-images.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "build-dev-images"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-update-dev-helm-failed:
-    needs: [update-dev-helm]
-    if: ${{ always() && needs.update-dev-helm.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "update-dev-helm"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-calculate-semver-failed:
-    needs: [calculate-semver]
-    if: ${{ always() && needs.calculate-semver.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "calculate-semver"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-validate-prod-candidates-failed:
-    needs: [validate-prod-candidates]
-    if: ${{ always() && needs.validate-prod-candidates.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "validate-prod-candidates"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-release-prod-images-failed:
-    needs: [release-prod-images]
-    if: ${{ always() && needs.release-prod-images.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "release-prod-images"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-
-
-  notify-update-prod-helm-failed:
-    needs: [update-prod-helm]
-    if: ${{ always() && needs.update-prod-helm.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
-    with:
-      service_name: "QuickHaul CI"
-      failed_job_name: "update-prod-helm"
-      environment: "CI"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
 

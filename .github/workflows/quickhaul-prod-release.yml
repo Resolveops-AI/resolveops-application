@@ -1,0 +1,227 @@
+name: QuickHaul Prod Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'quickhaul/**'
+      - '.github/workflows/quickhaul-prod-release.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  ACR_NAME: ${{ vars.ACR_NAME }}
+  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+
+jobs:
+  detect-changed-services:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_services_json: ${{ steps.detect.outputs.changed_services_json }}
+      skip_build: ${{ steps.detect.outputs.skip_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect Changed Services
+        id: detect
+        run: |
+          cat << 'EOF' > detect.py
+          import yaml, json, subprocess, fnmatch
+          with open('.github/service-map/quickhaul-services.yml', 'r') as f:
+              service_map = yaml.safe_load(f)
+          before = '${{ github.event.before }}'
+          sha = '${{ github.sha }}'
+          if before and before != '0000000000000000000000000000000000000000':
+              cmd = f"git diff --name-only {before} {sha}"
+          else:
+              cmd = f"git diff --name-only HEAD^ HEAD"
+          try:
+              output = subprocess.check_output(cmd, shell=True, text=True)
+          except subprocess.CalledProcessError:
+              output = ""
+          changed_files = [line.strip() for line in output.strip().split('\n') if line.strip()]
+          
+          docs_only = all(f.endswith('.md') for f in changed_files if f)
+          shared_changed = any(f.startswith("quickhaul/backend/shared/") for f in changed_files)
+          
+          changed_services = []
+          if not docs_only:
+              for svc, details in service_map.items():
+                  if shared_changed and details['context_path'] == "quickhaul/backend":
+                      changed_services.append(details)
+                      continue
+                  changed = False
+                  for file in changed_files:
+                      for path in details['source_paths']:
+                          if fnmatch.fnmatch(file, path):
+                              changed = True
+                              break
+                      if changed:
+                          break
+                  if changed:
+                      changed_services.append(details)
+          
+          with open('output.json', 'w') as f:
+              json.dump(changed_services, f)
+          EOF
+          python3 -m pip install pyyaml
+          python3 detect.py
+          JSON_OUT=$(cat output.json)
+          if [ "$JSON_OUT" == "[]" ]; then
+             echo "skip_build=true" >> $GITHUB_OUTPUT
+             echo "changed_services_json=[{\"service_name\":\"dummy\",\"context_path\":\".\",\"dockerfile_path\":\"Dockerfile\",\"image_name\":\"dummy\",\"helm_values_tag_key\":\"dummy\"}]" >> $GITHUB_OUTPUT
+          else
+             echo "skip_build=false" >> $GITHUB_OUTPUT
+             echo "changed_services_json=$JSON_OUT" >> $GITHUB_OUTPUT
+          fi
+
+  validation:
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Validating changed services for production."
+
+  calculate-semver:
+    needs: [detect-changed-services, validation]
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.semver.outputs.new_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Calculate Next Version
+        id: semver
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dry_run: true
+          default_bump: patch
+          release_branches: main
+
+  validate-dev-image:
+    needs: [detect-changed-services, calculate-semver]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+      - name: Pull Dev Images and Run Trivy
+        run: |
+          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            IMAGE_NAME=$(echo $row | jq -r '.image_name')
+            DEV_TAG=$(yq e "${KEY}" quickhaul/helm/quickhaul/values-dev.yaml)
+            
+            echo "Pulling $IMAGE_NAME:$DEV_TAG"
+            docker pull ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG
+            
+            echo "Running Trivy on $IMAGE_NAME:$DEV_TAG"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image \
+              --exit-code 0 --severity CRITICAL,HIGH ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG
+              
+            EXISTS=$(az acr repository show-tags -n ${{ env.ACR_NAME }} --repository $IMAGE_NAME --query "[?@ == '${VERSION}']" -o tsv)
+            if [ -n "$EXISTS" ]; then
+              echo "Error: Tag $VERSION already exists in ACR for $IMAGE_NAME!"
+              exit 1
+            fi
+            
+            echo "$IMAGE_NAME=$DEV_TAG" >> dev_tags.env
+          done
+      - name: Upload dev tags mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev_tags
+          path: dev_tags.env
+
+  production-approval:
+    needs: [validate-dev-image]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "Production environment approved!"
+
+  promote-image:
+    needs: [detect-changed-services, calculate-semver, production-approval]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download dev tags mapping
+        uses: actions/download-artifact@v4
+        with:
+          name: dev_tags
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Retag and Push Semantic Version
+        run: |
+          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          
+          for row in $(jq -c '.[]' changed.json); do
+            IMAGE_NAME=$(echo $row | jq -r '.image_name')
+            DEV_TAG=$(grep "^${IMAGE_NAME}=" dev_tags.env | cut -d'=' -f2)
+            
+            echo "Retagging $IMAGE_NAME from $DEV_TAG to $VERSION"
+            az acr import --name ${{ env.ACR_NAME }} \
+              --source ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG \
+              --image $IMAGE_NAME:$VERSION
+          done
+      - name: Create Git Tag
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          custom_tag: ${{ needs.calculate-semver.outputs.new_version }}
+
+  update-prod-helm-values:
+    needs: [detect-changed-services, calculate-semver, promote-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Update values-prod.yaml
+        run: |
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            yq e "${KEY} = \"${VERSION}\"" -i quickhaul/helm/quickhaul/values-prod.yaml
+          done
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add quickhaul/helm/quickhaul/values-prod.yaml
+          git commit -m "chore: release quickhaul $VERSION [skip ci]" || echo "No changes to commit"
+          git push origin main
+
+  sync-argo-prod:
+    needs: [update-prod-helm-values]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/cd-reusable-template.yml@main
+    secrets: inherit
+    with:
+      argocd_app_name: quickhaul-prod
+      argocd_server: ${{ vars.ARGOCD_SERVER }}

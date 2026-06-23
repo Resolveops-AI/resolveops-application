@@ -1,4 +1,4 @@
-name: ResolveOps AI CI
+name: QuickHaul PR Validation
 
 on:
   pull_request:
@@ -6,17 +6,8 @@ on:
       - main
     types: [opened, synchronize, reopened]
     paths:
-      - 'services/**'
-      - 'frontend/**'
-      - '.github/workflows/resolveops-ci.yml'
-  push:
-    branches:
-      - dev
-      - main
-    paths:
-      - 'services/**'
-      - 'frontend/**'
-      - '.github/workflows/resolveops-ci.yml'
+      - 'quickhaul/**'
+      - '.github/workflows/quickhaul-pr-validation.yml'
 
 permissions:
   contents: read
@@ -33,35 +24,20 @@ jobs:
     outputs:
       changed_services_json: ${{ steps.detect.outputs.changed_services_json }}
       skip_build: ${{ steps.detect.outputs.skip_build }}
-      short_sha: ${{ steps.vars.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Calculate Variables
-        id: vars
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
       - name: Detect Changed Services
         id: detect
         run: |
           cat << 'EOF' > detect.py
           import yaml, json, subprocess, fnmatch
-          with open('.github/service-map/resolveops-services.yml', 'r') as f:
+          with open('.github/service-map/quickhaul-services.yml', 'r') as f:
               service_map = yaml.safe_load(f)
-          event_name = '${{ github.event_name }}'
-          if event_name == 'pull_request':
-              base_sha = '${{ github.event.pull_request.base.sha }}'
-              head_sha = '${{ github.event.pull_request.head.sha }}'
-              cmd = f"git diff --name-only {base_sha} {head_sha}"
-          else:
-              before = '${{ github.event.before }}'
-              sha = '${{ github.sha }}'
-              if before and before != '0000000000000000000000000000000000000000':
-                  cmd = f"git diff --name-only {before} {sha}"
-              else:
-                  cmd = f"git diff --name-only HEAD^ HEAD"
+          base_sha = '${{ github.event.pull_request.base.sha }}'
+          head_sha = '${{ github.event.pull_request.head.sha }}'
+          cmd = f"git diff --name-only {base_sha} {head_sha}"
           try:
               output = subprocess.check_output(cmd, shell=True, text=True)
           except subprocess.CalledProcessError:
@@ -69,10 +45,14 @@ jobs:
           changed_files = [line.strip() for line in output.strip().split('\n') if line.strip()]
           
           docs_only = all(f.endswith('.md') for f in changed_files if f)
+          shared_changed = any(f.startswith("quickhaul/backend/shared/") for f in changed_files)
           
           changed_services = []
           if not docs_only:
               for svc, details in service_map.items():
+                  if shared_changed and details['context_path'] == "quickhaul/backend":
+                      changed_services.append(details)
+                      continue
                   changed = False
                   for file in changed_files:
                       for path in details['source_paths']:
@@ -135,10 +115,10 @@ jobs:
       run_snyk: true
       run_trivy: false
 
-  build-trivy:
+  temp-docker-build-trivy:
     name: Build & Trivy Scan (${{ matrix.service.image_name }})
     needs: [detect-changed-services, snyk-scan]
-    if: needs.detect-changed-services.outputs.skip_build == 'false' && github.event_name == 'pull_request'
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -152,21 +132,3 @@ jobs:
       context_path: ${{ matrix.service.context_path }}
       image_tag: pr-${{ github.event.pull_request.number }}-${{ github.sha }}
       push_image: false
-
-  build-trivy-push:
-    name: Build & Push (${{ matrix.service.image_name }})
-    needs: [detect-changed-services, snyk-scan]
-    if: needs.detect-changed-services.outputs.skip_build == 'false' && github.event_name == 'push'
-    strategy:
-      matrix:
-        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
-    secrets: inherit
-    with:
-      image_name: ${{ matrix.service.image_name }}
-      acr_name: ${{ vars.ACR_NAME }}
-      acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
-      dockerfile_path: ${{ matrix.service.dockerfile_path }}
-      context_path: ${{ matrix.service.context_path }}
-      image_tag: push-${{ needs.detect-changed-services.outputs.short_sha }}
-      push_image: true

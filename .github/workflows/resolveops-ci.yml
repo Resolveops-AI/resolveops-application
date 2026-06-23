@@ -103,11 +103,12 @@ jobs:
           python3 -m pip install pyyaml
           python3 detect.py
           JSON_OUT=$(cat output.json)
-          echo "changed_services_json=$JSON_OUT" >> $GITHUB_OUTPUT
           if [ "$JSON_OUT" == "[]" ]; then
              echo "skip_build=true" >> $GITHUB_OUTPUT
+             echo "changed_services_json=[{\"service_name\":\"dummy\",\"context_path\":\".\",\"dockerfile_path\":\"Dockerfile\",\"image_name\":\"dummy\",\"helm_values_tag_key\":\"dummy\"}]" >> $GITHUB_OUTPUT
           else
              echo "skip_build=false" >> $GITHUB_OUTPUT
+             echo "changed_services_json=$JSON_OUT" >> $GITHUB_OUTPUT
           fi
 
   lint-testing:

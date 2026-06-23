@@ -218,3 +218,9 @@ gatewayAPI:
   enabled: false
   className: "kong"
   host: ""
+
+# ── Node Scheduling ───────────────────────────────────────────
+# Target the AKS user node pool for all application workloads.
+# The system node pool is protected with CriticalAddonsOnly=true:NoSchedule.
+nodeSelector:
+  kubernetes.azure.com/mode: user

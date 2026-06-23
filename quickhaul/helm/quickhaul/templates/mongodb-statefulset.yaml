@@ -18,6 +18,8 @@ spec:
       labels:
         app: quickhaul-mongodb
     spec:
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
       securityContext:
         fsGroup: 999
       containers:

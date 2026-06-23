@@ -4,6 +4,8 @@ grafana:
     existingSecret: "grafana-admin-secret"
     userKey: admin-user
     passwordKey: admin-password
+  nodeSelector:
+    kubernetes.azure.com/mode: user
   # In order to auto-load the dashboard we will use a ConfigMap sidecar or similar,
   # but for this configuration we'll keep it simple as requested.
 
@@ -16,3 +18,5 @@ prometheus:
         memory: 256Mi
     serviceMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
+    nodeSelector:
+      kubernetes.azure.com/mode: user

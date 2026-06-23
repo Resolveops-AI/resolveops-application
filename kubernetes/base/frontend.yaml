@@ -14,6 +14,8 @@ spec:
       labels:
         app: frontend
     spec:
+      nodeSelector:
+        kubernetes.azure.com/mode: user
       serviceAccountName: resolveops-workload-identity-sa
       securityContext:
         fsGroup: 10001

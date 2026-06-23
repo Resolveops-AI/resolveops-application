@@ -18,6 +18,8 @@ spec:
       labels:
         {{- include "quickhaul.selectorLabels" (dict "root" . "component" "frontend") | nindent 8 }}
     spec:
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
       serviceAccountName: {{ include "quickhaul.serviceAccountName" . }}
       securityContext:
         fsGroup: 101
@@ -88,6 +90,8 @@ spec:
       labels:
         {{- include "quickhaul.selectorLabels" (dict "root" $root "component" $svc.component) | nindent 8 }}
     spec:
+      nodeSelector:
+        {{- toYaml $root.Values.nodeSelector | nindent 8 }}
       serviceAccountName: {{ include "quickhaul.serviceAccountName" $root }}
       securityContext:
         fsGroup: 10001

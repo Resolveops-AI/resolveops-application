@@ -243,6 +243,7 @@ jobs:
     secrets: inherit
     with:
       argocd_app_name: quickhaul-dev
+      argocd_server: ${{ vars.ARGOCD_SERVER }}
 
   # ==========================================
   # MAIN FLOW (PROD IMAGES)
@@ -380,6 +381,7 @@ jobs:
     secrets: inherit
     with:
       argocd_app_name: quickhaul-prod
+      argocd_server: ${{ vars.ARGOCD_SERVER }}
 
   # ==========================================
   # NOTIFICATIONS

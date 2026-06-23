@@ -6,6 +6,8 @@ frontend:
   image:
     tag: "8"
   replicaCount: 1
+  service:
+    type: LoadBalancer
 locationService:
   image:
     tag: "8"

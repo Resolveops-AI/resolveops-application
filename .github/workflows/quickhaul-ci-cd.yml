@@ -1,23 +1,20 @@
-name: ResolveOps AI CI
-# Trigger build
+name: QuickHaul CI/CD
 
 on:
-  pull_request:
-    branches:
-      - main
-    types: [opened, synchronize, reopened]
-    paths:
-      - 'services/**'
-      - 'frontend/**'
-      - '.github/workflows/resolveops-ci.yml'
   push:
     branches:
       - feature/dev
       - main
     paths:
-      - 'services/**'
-      - 'frontend/**'
-      - '.github/workflows/resolveops-ci.yml'
+      - 'quickhaul/**'
+      - '.github/workflows/quickhaul-ci-cd.yml'
+  pull_request:
+    branches:
+      - feature/dev
+      - main
+    paths:
+      - 'quickhaul/**'
+      - '.github/workflows/quickhaul-ci-cd.yml'
 
 permissions:
   contents: write
@@ -51,13 +48,47 @@ jobs:
         id: detect
         run: |
           cat << 'EOF' > detect.py
-          import yaml, json
-          with open('.github/service-map/resolveops-services.yml', 'r') as f:
+          import yaml, json, subprocess, fnmatch
+          with open('.github/service-map/quickhaul-services.yml', 'r') as f:
               service_map = yaml.safe_load(f)
               
-          # FORCING ALL SERVICES TO BUILD FOR INITIAL DEPLOYMENT
-          changed_services = list(service_map.values())
+          try:
+              if '${{ github.event_name }}' == 'pull_request':
+                  base_sha = '${{ github.event.pull_request.base.sha }}'
+                  head_sha = '${{ github.event.pull_request.head.sha }}'
+                  cmd = f"git diff --name-only {base_sha} {head_sha}"
+                  output = subprocess.check_output(cmd, shell=True, text=True)
+                  changed_files = [line.strip() for line in output.strip().split('\n') if line.strip()]
+              else:
+                  cmd = "git diff --name-only HEAD^ HEAD"
+                  output = subprocess.check_output(cmd, shell=True, text=True)
+                  changed_files = [line.strip() for line in output.strip().split('\n') if line.strip()]
+          except Exception:
+              changed_files = []
+              
+          docs_only = all(f.endswith('.md') for f in changed_files if f)
+          shared_changed = any(f.startswith("quickhaul/backend/shared/") for f in changed_files)
           
+          changed_services = []
+          if not docs_only and changed_files:
+              for svc, details in service_map.items():
+                  if shared_changed and details['context_path'] == "quickhaul/backend":
+                      changed_services.append(details)
+                      continue
+                  changed = False
+                  for file in changed_files:
+                      for path in details['source_paths']:
+                          if fnmatch.fnmatch(file, path):
+                              changed = True
+                              break
+                      if changed:
+                          break
+                  if changed:
+                      changed_services.append(details)
+          
+          if not changed_services:
+              changed_services = list(service_map.values())
+              
           with open('output.json', 'w') as f:
               json.dump(changed_services, f)
           EOF
@@ -82,7 +113,7 @@ jobs:
   sonar-scan:
     name: SonarQube Scan (${{ matrix.service.image_name }})
     needs: [detect-changed-services, lint-testing]
-    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    if: needs.detect-changed-services.outputs.skip_build == 'false' && github.event_name == 'pull_request'
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -97,7 +128,7 @@ jobs:
   snyk-scan:
     name: Snyk Scan (${{ matrix.service.image_name }})
     needs: [detect-changed-services, sonar-scan]
-    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    if: needs.detect-changed-services.outputs.skip_build == 'false' && github.event_name == 'pull_request'
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -145,8 +176,7 @@ jobs:
       image_tag: v1.0.${{ github.run_number }}
       push_image: true
 
-  update-kustomization:
-    name: Update kustomization.yaml image tags
+  update-helm-values:
     needs: [detect-changed-services, build-push-merge]
     if: needs.detect-changed-services.outputs.skip_build == 'false' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -156,28 +186,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-      - name: Install kustomize
+      - name: Update values.yaml with Semantic Tag
         run: |
-          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-          sudo mv kustomize /usr/local/bin/
-      - name: Update image tags in kustomization.yaml
-        run: |
-          SEMANTIC_TAG="v1.0.${{ github.run_number }}"
           echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
-
-          cd kubernetes/base
-          for row in $(jq -c '.[]' ../../changed.json); do
-            IMAGE_KEY=$(echo $row | jq -r '.kustomize_image_key')
-            if [ "$IMAGE_KEY" != "null" ]; then
-              echo "Updating image $IMAGE_KEY to tag $SEMANTIC_TAG"
-              kustomize edit set image "${IMAGE_KEY}:${SEMANTIC_TAG}"
-            fi
+          SEMANTIC_TAG="v1.0.${{ github.run_number }}"
+          
+          if [ "${{ github.ref_name }}" == "main" ]; then
+             TARGET_FILE="quickhaul/helm/quickhaul/values-prod.yaml"
+          else
+             TARGET_FILE="quickhaul/helm/quickhaul/values-dev.yaml"
+          fi
+          
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            yq e "${KEY} = \"${SEMANTIC_TAG}\"" -i $TARGET_FILE
           done
-          cd ../..
-
+          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add kubernetes/base/kustomization.yaml
-          git commit -m "chore: update resolveops-ai image tags to $SEMANTIC_TAG [skip ci]" || echo "No changes to commit"
+          git add $TARGET_FILE
+          git commit -m "chore: update quickhaul image tags to $SEMANTIC_TAG [skip ci]" || echo "No changes to commit"
           git push origin ${{ github.ref_name }}
-

@@ -14,7 +14,7 @@ locationService:
   replicaCount: 1
 authService:
   image:
-    tag: "8"
+    tag: "dev-faa8392"
   replicaCount: 1
 bookingService:
   image:

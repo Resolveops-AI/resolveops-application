@@ -77,3 +77,4 @@ jobs:
       update_key: .paymentService.image.tag
     secrets:
       HELM_REPO_PAT: ${{ secrets.HELM_REPO_PAT }}
+# trigger build

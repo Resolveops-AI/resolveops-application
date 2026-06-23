@@ -75,3 +75,4 @@ jobs:
       update_key: resolveopsacr05.azurecr.io/ai-rca-service
     secrets:
       HELM_REPO_PAT: ${{ secrets.HELM_REPO_PAT }}
+# trigger build

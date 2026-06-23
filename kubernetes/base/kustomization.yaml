@@ -22,19 +22,19 @@ resources:
 # successful build, using `kustomize edit set image`. Do not edit tags manually.
 # The registry (resolveopsacr05.azurecr.io) is stable and set here intentionally.
 images:
-- name: resolveopsacr05.azurecr.io/frontend
-  newTag: placeholder
-- name: resolveopsacr05.azurecr.io/api-gateway-service
-  newTag: placeholder
-- name: resolveopsacr05.azurecr.io/auth-service
-  newTag: placeholder
-- name: resolveopsacr05.azurecr.io/azure-intelligence-service
-  newTag: placeholder
 - name: resolveopsacr05.azurecr.io/ai-rca-service
-  newTag: placeholder
-- name: resolveopsacr05.azurecr.io/github-intelligence-service
-  newTag: placeholder
+  newTag: v1.0.73
+- name: resolveopsacr05.azurecr.io/api-gateway-service
+  newTag: v1.0.73
+- name: resolveopsacr05.azurecr.io/auth-service
+  newTag: v1.0.73
 - name: resolveopsacr05.azurecr.io/aws-intelligence-service
-  newTag: placeholder
+  newTag: v1.0.73
+- name: resolveopsacr05.azurecr.io/azure-intelligence-service
+  newTag: v1.0.73
+- name: resolveopsacr05.azurecr.io/frontend
+  newTag: v1.0.73
+- name: resolveopsacr05.azurecr.io/github-intelligence-service
+  newTag: v1.0.73
 - name: resolveopsacr05.azurecr.io/notification-service
-  newTag: placeholder
+  newTag: v1.0.73

@@ -392,6 +392,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "detect-changed-services"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-lint-testing-failed:
     needs: [lint-testing]
@@ -401,6 +409,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "lint-testing"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-sast-sonar-scan-failed:
     needs: [sast-sonar-scan]
@@ -410,6 +426,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "sast-sonar-scan"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-sca-snyk-scan-failed:
     needs: [sca-snyk-scan]
@@ -419,6 +443,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "sca-snyk-scan"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-helm-validation-failed:
     needs: [helm-validation]
@@ -428,6 +460,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "helm-validation"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-build-temp-images-failed:
     needs: [build-temp-images]
@@ -437,6 +477,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "build-temp-images"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-build-dev-images-failed:
     needs: [build-dev-images]
@@ -446,6 +494,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "build-dev-images"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-update-dev-helm-failed:
     needs: [update-dev-helm]
@@ -455,6 +511,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "update-dev-helm"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-calculate-semver-failed:
     needs: [calculate-semver]
@@ -464,6 +528,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "calculate-semver"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-validate-prod-candidates-failed:
     needs: [validate-prod-candidates]
@@ -473,6 +545,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "validate-prod-candidates"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-release-prod-images-failed:
     needs: [release-prod-images]
@@ -482,6 +562,14 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "release-prod-images"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+
 
   notify-update-prod-helm-failed:
     needs: [update-prod-helm]
@@ -491,3 +579,11 @@ jobs:
     with:
       service_name: "QuickHaul CI"
       failed_job_name: "update-prod-helm"
+      environment: "CI"
+      status: "Failure"
+      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      branch_name: "${{ github.ref_name }}"
+      commit_sha: "${{ github.sha }}"
+      actor: "${{ github.actor }}"
+      workflow_name: "${{ github.workflow }}"
+

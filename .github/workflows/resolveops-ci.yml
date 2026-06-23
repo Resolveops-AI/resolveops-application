@@ -142,7 +142,7 @@ jobs:
       acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
       dockerfile_path: ${{ matrix.service.dockerfile_path }}
       context_path: ${{ matrix.service.context_path }}
-      image_tag: ${{ needs.detect-changed-services.outputs.safe_ref }}-${{ needs.detect-changed-services.outputs.short_sha }}
+      image_tag: dev-${{ needs.detect-changed-services.outputs.short_sha }}
       push_image: true
 
   update-kustomization:
@@ -162,7 +162,7 @@ jobs:
           sudo mv kustomize /usr/local/bin/
       - name: Update image tags in kustomization.yaml
         run: |
-          TAG="${{ needs.detect-changed-services.outputs.safe_ref }}-${{ needs.detect-changed-services.outputs.short_sha }}"
+          TAG="dev-${{ needs.detect-changed-services.outputs.short_sha }}"
           echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
 
           cd kubernetes/base

@@ -113,7 +113,7 @@ jobs:
       acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
       dockerfile_path: ${{ matrix.service.dockerfile_path }}
       context_path: ${{ matrix.service.context_path }}
-      image_tag: ${{ needs.detect-changed-services.outputs.safe_ref }}-${{ needs.detect-changed-services.outputs.short_sha }}
+      image_tag: dev-${{ needs.detect-changed-services.outputs.short_sha }}
       push_image: true
 
   update-dev-helm-values:
@@ -128,12 +128,16 @@ jobs:
       - name: Update values-dev.yaml
         run: |
           echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
-          DEV_TAG="${{ needs.detect-changed-services.outputs.safe_ref }}-${{ needs.detect-changed-services.outputs.short_sha }}"
+          DEV_TAG="dev-${{ needs.detect-changed-services.outputs.short_sha }}"
           
           for row in $(jq -c '.[]' changed.json); do
             KEY=$(echo $row | jq -r '.helm_values_tag_key')
             yq e "${KEY} = \"${DEV_TAG}\"" -i quickhaul/helm/quickhaul/values-dev.yaml
           done
+          
+          # Validate Helm templates before committing
+          helm lint quickhaul/helm/quickhaul
+          helm template quickhaul-dev quickhaul/helm/quickhaul -n quickhaul-dev -f quickhaul/helm/quickhaul/values-dev.yaml | grep -n "image:"
           
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

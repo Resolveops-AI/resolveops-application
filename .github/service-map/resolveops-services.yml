@@ -4,7 +4,7 @@ resolveops-frontend:
     - "frontend/**"
   dockerfile_path: "frontend/Dockerfile"
   context_path: "frontend"
-  image_name: "frontend"
+  image_name: "resolveops-frontend"
   kustomize_image_key: "resolveopsacr05.azurecr.io/frontend"
   app_group: "resolveops"
 

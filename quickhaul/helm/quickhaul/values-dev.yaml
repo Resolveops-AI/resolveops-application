@@ -4,7 +4,7 @@ global:
   imageRegistry: "" # injected via ArgoCD helm.parameter
 frontend:
   image:
-    tag: v1.0.1
+    tag: "8"
   replicaCount: 1
 locationService:
   image:

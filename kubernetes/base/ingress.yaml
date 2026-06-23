@@ -4,7 +4,7 @@ metadata:
   name: resolveops-ingress
   namespace: resolveops
 spec:
-  ingressClassName: azure/application-gateway
+  ingressClassName: azure-application-gateway
   rules:
   - host: resolveops-ai.sathvikdevops.online
     http:

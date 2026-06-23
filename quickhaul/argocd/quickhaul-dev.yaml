@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: quickhaul-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Resolveops-AI/resolveops-application.git
+    targetRevision: feature/dev
+    path: quickhaul/helm/quickhaul
+    helm:
+      valueFiles:
+      - values-dev.yaml
+      parameters:
+      - name: global.imageRegistry
+        value: resolveopsacr05.azurecr.io
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: quickhaul-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true

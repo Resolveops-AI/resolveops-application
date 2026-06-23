@@ -25,7 +25,7 @@ images:
 - name: resolveopsacr05.azurecr.io/ai-rca-service
   newTag: "4"
 - name: resolveopsacr05.azurecr.io/api-gateway-service
-  newTag: v1.0.73
+  newTag: "6"
 - name: resolveopsacr05.azurecr.io/auth-service
   newTag: v1.0.73
 - name: resolveopsacr05.azurecr.io/aws-intelligence-service

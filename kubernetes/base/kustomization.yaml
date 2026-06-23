@@ -23,7 +23,7 @@ resources:
 # The registry (resolveopsacr05.azurecr.io) is stable and set here intentionally.
 images:
 - name: resolveopsacr05.azurecr.io/ai-rca-service
-  newTag: v1.0.73
+  newTag: "2"
 - name: resolveopsacr05.azurecr.io/api-gateway-service
   newTag: v1.0.73
 - name: resolveopsacr05.azurecr.io/auth-service

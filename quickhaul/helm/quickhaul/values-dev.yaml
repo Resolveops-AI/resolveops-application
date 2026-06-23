@@ -47,7 +47,7 @@ redis:
     enabled: false
 ingress:
   enabled: true
-  className: azure/application-gateway
+  className: azure-application-gateway
   host: dev.quickhaul.sathvikdevops.site
 resources:
   requests:

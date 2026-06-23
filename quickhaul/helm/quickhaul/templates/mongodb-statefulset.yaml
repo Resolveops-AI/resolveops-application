@@ -24,7 +24,7 @@ spec:
         fsGroup: 999
       containers:
         - name: mongodb
-          image: {{ include "quickhaul.image" (dict "registry" .Values.global.imageRegistry "image" .Values.mongodb.image) }}
+          image: "{{ .Values.mongodb.image.repository }}:{{ .Values.mongodb.image.tag }}"
           imagePullPolicy: {{ .Values.mongodb.image.pullPolicy | default "IfNotPresent" }}
           ports:
             - name: mongo

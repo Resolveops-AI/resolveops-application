@@ -40,6 +40,14 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Booking Service", version="2.0.0", lifespan=lifespan)
 
+from fastapi import APIRouter
+router = APIRouter(prefix='/api/bookings')
+
+@router.get('')
+@router.get('/')
+async def root_health():
+    return {'status': 'healthy'}
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -158,7 +166,7 @@ def get_estimated_delivery(transport_type: str) -> str:
     }
     return delivery_times.get(transport_type, "4-6 hours")
 
-@app.get("/bookings", response_model=List[dict])
+@router.get("", response_model=List[dict])
 async def get_user_bookings(user_id: str = Depends(get_current_user_id)):
     """Get all bookings for the authenticated user from MongoDB"""
     db = get_db()
@@ -187,7 +195,7 @@ async def get_user_bookings(user_id: str = Depends(get_current_user_id)):
         })
     return bookings
 
-@app.post("/bookings", response_model=BookingResponse)
+@router.post("", response_model=BookingResponse)
 async def create_booking(booking: BookingRequest, user_id: str = Depends(get_current_user_id)):
     """Create a new booking"""
     
@@ -594,7 +602,7 @@ async def create_booking(booking: BookingRequest, user_id: str = Depends(get_cur
         payment_id=payment_id
     )
 
-@app.get("/bookings/{booking_id}")
+@router.get("/{booking_id}")
 async def get_booking(booking_id: str):
     """Get booking details by ID"""
     booking_key = f"booking:{booking_id}"
@@ -605,7 +613,7 @@ async def get_booking(booking_id: str):
     
     return json.loads(booking_data)
 
-@app.get("/bookings/customer/{phone}")
+@router.get("/customer/{phone}")
 async def get_customer_bookings(phone: str):
     """Get all bookings for a customer"""
     customer_key = f"customer:{phone}:bookings"
@@ -620,7 +628,7 @@ async def get_customer_bookings(phone: str):
     
     return {"bookings": bookings}
 
-@app.get("/pricing/{transport_type}")
+@router.get("/pricing/{transport_type}")
 async def get_pricing(transport_type: str, distance_km: float = 10):
     """Get pricing for transport type"""
     if transport_type not in PRICING_CONFIG:
@@ -633,7 +641,7 @@ async def get_pricing(transport_type: str, distance_km: float = 10):
         **amount_details
     }
 
-@app.delete("/bookings/{booking_id}")
+@router.delete("/{booking_id}")
 async def cancel_booking(booking_id: str):
     """Cancel a booking"""
     booking_key = f"booking:{booking_id}"
@@ -657,14 +665,16 @@ async def cancel_booking(booking_id: str):
     
     return {"message": "Booking cancelled successfully", "booking_id": booking_id}
 
-@app.get("/health")
+@router.get("/health")
 async def health_check():
     """Health check endpoint"""
     try:
         redis_client.ping()
-        return {"status": "healthy", "redis": "connected"}
+        return {"status": "healthy", "redis": "connected", "redis_required": False}
     except:
-        return {"status": "unhealthy", "redis": "disconnected"}
+        return {"status": "healthy", "redis": "disconnected", "redis_required": False}
+
+app.include_router(router)
 
 if __name__ == "__main__":
     import uvicorn

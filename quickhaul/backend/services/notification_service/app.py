@@ -16,6 +16,14 @@ from shared.config import settings
 
 app = FastAPI(title="Notification Service", version="2.0.0")
 
+from fastapi import APIRouter
+router = APIRouter(prefix='/api/notifications')
+
+@router.get('')
+@router.get('/')
+async def root_health():
+    return {'status': 'healthy'}
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -124,7 +132,7 @@ async def send_email_via_smtp(to_email: str, subject: str, body: str) -> dict:
             "message": f"Email sending failed: {error_msg}"
         }
 
-@app.post("/send-email")
+@router.post("/send-email")
 async def send_email(payload: EmailRequest):
     """Send email notification"""
     logger.info(f"Received request to send email to {payload.to_email}")
@@ -132,13 +140,13 @@ async def send_email(payload: EmailRequest):
     logger.info(f"Email send result for {payload.to_email}: {result}")
     return result
 
-@app.post("/send-sms")
+@router.post("/send-sms")
 async def send_sms(payload: SMSRequest):
     """Send SMS notification (placeholder for Twilio integration)"""
     logger.info(f"\n[SMS] To: {payload.phone}\nMessage: {payload.message}\n")
     return {"success": True, "message": "SMS logged (SMS provider not configured)"}
 
-@app.post("/send-otp")
+@router.post("/send-otp")
 async def send_otp(payload: SendOTPRequest):
     """OTP delivery endpoint - sends email with OTP"""
     subject = "Your OTP for QuickHaul Registration"
@@ -165,7 +173,7 @@ QuickHaul Team
     
     return result
 
-@app.get("/health")
+@router.get("/health")
 async def health():
     """Health check endpoint"""
     # Local SMTP (port 1025) doesn't need credentials, external services do
@@ -178,6 +186,8 @@ async def health():
         "smtp_configured": smtp_configured,
         "smtp_host": settings.smtp_host if settings.smtp_enabled else None
     }
+
+app.include_router(router)
 
 if __name__ == "__main__":
     import uvicorn

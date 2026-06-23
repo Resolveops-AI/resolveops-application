@@ -16,6 +16,14 @@ NOTIFICATION_SERVICE_URL = settings.notification_service_url
 
 app = FastAPI(title="OTP Service", version="2.0.0")
 
+from fastapi import APIRouter
+router = APIRouter(prefix='/api/otp')
+
+@router.get('')
+@router.get('/')
+async def root_health():
+    return {'status': 'healthy'}
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -60,7 +68,7 @@ def format_email_otp_message(email: str, otp: str) -> str:
     QuickHaul Team
     """
 
-@app.post("/send")
+@router.post("/send")
 async def send_otp(request: OTPRequest):
     """Send OTP to email via notification service"""
     email = request.email
@@ -112,7 +120,7 @@ async def send_otp(request: OTPRequest):
         "expires_in": 600  # 10 minutes in seconds
     }
 
-@app.post("/verify")
+@router.post("/verify")
 async def verify_otp(request: OTPVerifyRequest):
     """Verify OTP"""
     email = request.email
@@ -138,7 +146,7 @@ async def verify_otp(request: OTPVerifyRequest):
         "message": "OTP verified successfully"
     }
 
-@app.post("/send-phone")
+@router.post("/send-phone")
 async def send_phone_otp(phone: str):
     """Send OTP to phone (development mode - prints to console)"""
     if not phone:
@@ -164,7 +172,7 @@ async def send_phone_otp(phone: str):
         "expires_in": 600
     }
 
-@app.post("/verify-phone")
+@router.post("/verify-phone")
 async def verify_phone_otp(phone: str, otp: str):
     """Verify phone OTP"""
     if not phone or not otp:
@@ -187,7 +195,7 @@ async def verify_phone_otp(phone: str, otp: str):
         "message": "Phone OTP verified successfully"
     }
 
-@app.delete("/clear")
+@router.delete("/clear")
 async def clear_otp(email: str = None, phone: str = None):
     """Clear OTP for testing purposes"""
     if email:
@@ -199,7 +207,7 @@ async def clear_otp(email: str = None, phone: str = None):
     else:
         raise HTTPException(status_code=400, detail="Email or phone is required")
 
-@app.get("/status")
+@router.get("/status")
 async def get_otp_status():
     """Get OTP service status and stored OTPs (development only)"""
     try:
@@ -221,14 +229,16 @@ async def get_otp_status():
             "error": str(e)
         }
 
-@app.get("/health")
+@router.get("/health")
 async def health_check():
     """Health check endpoint"""
     try:
         redis_client.ping()
-        return {"status": "healthy", "redis": "connected"}
+        return {"status": "healthy", "redis": "connected", "redis_required": False}
     except:
-        return {"status": "unhealthy", "redis": "disconnected"}
+        return {"status": "healthy", "redis": "disconnected", "redis_required": False}
+
+app.include_router(router)
 
 if __name__ == "__main__":
     import uvicorn

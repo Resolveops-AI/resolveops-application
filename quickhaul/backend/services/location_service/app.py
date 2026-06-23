@@ -16,6 +16,14 @@ from shared.config import settings
 
 app = FastAPI(title="Location Service", version="1.0.0")
 
+from fastapi import APIRouter
+router = APIRouter(prefix='/api/locations')
+
+@router.get('')
+@router.get('/')
+async def root_health():
+    return {'status': 'healthy'}
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -31,7 +39,7 @@ redis_client = redis.from_url(settings.redis_url, db=0, decode_responses=True)
 # Cache TTL (1 hour)
 CACHE_TTL = timedelta(hours=1)
 
-@app.get("/states")
+@router.get("/states")
 async def get_states():
     """Get all Indian states"""
     cache_key = "states"
@@ -55,7 +63,7 @@ async def get_states():
     
     return states
 
-@app.get("/districts")
+@router.get("/districts")
 async def get_districts(state: str):
     """Get districts by state ID"""
     if not state:
@@ -85,7 +93,7 @@ async def get_districts(state: str):
     
     return districts
 
-@app.get("/centers")
+@router.get("/centers")
 async def get_centers(state: str, district: str):
     """Get centers by state and district IDs"""
     if not state or not district:
@@ -115,7 +123,7 @@ async def get_centers(state: str, district: str):
     
     return centers
 
-@app.delete("/cache")
+@router.delete("/cache")
 async def clear_cache():
     """Clear all location cache (for development/testing)"""
     keys = redis_client.keys("states*") + redis_client.keys("districts*") + redis_client.keys("centers*")
@@ -123,14 +131,16 @@ async def clear_cache():
         redis_client.delete(*keys)
     return {"message": f"Cleared {len(keys)} cache entries"}
 
-@app.get("/health")
+@router.get("/health")
 async def health_check():
     """Health check endpoint"""
     try:
         redis_client.ping()
-        return {"status": "healthy", "redis": "connected"}
+        return {"status": "healthy", "redis": "connected", "redis_required": False}
     except:
-        return {"status": "unhealthy", "redis": "disconnected"}
+        return {"status": "healthy", "redis": "disconnected", "redis_required": False}
+
+app.include_router(router)
 
 if __name__ == "__main__":
     import uvicorn

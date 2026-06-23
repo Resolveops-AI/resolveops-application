@@ -34,6 +34,7 @@ jobs:
       changed_services_json: ${{ steps.detect.outputs.changed_services_json }}
       skip_build: ${{ steps.detect.outputs.skip_build }}
       short_sha: ${{ steps.vars.outputs.short_sha }}
+      safe_ref: ${{ steps.vars.outputs.safe_ref }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,6 +44,8 @@ jobs:
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          SAFE_REF=$(echo "${{ github.ref_name }}" | tr '/' '-')
+          echo "safe_ref=$SAFE_REF" >> $GITHUB_OUTPUT
       - name: Detect Changed Services
         id: detect
         run: |
@@ -138,7 +141,7 @@ jobs:
       acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
       dockerfile_path: ${{ matrix.service.dockerfile_path }}
       context_path: ${{ matrix.service.context_path }}
-      image_tag: ${{ github.ref_name }}-${{ needs.detect-changed-services.outputs.short_sha }}
+      image_tag: ${{ needs.detect-changed-services.outputs.safe_ref }}-${{ needs.detect-changed-services.outputs.short_sha }}
       push_image: true
 
   update-kustomization:
@@ -158,7 +161,7 @@ jobs:
           sudo mv kustomize /usr/local/bin/
       - name: Update image tags in kustomization.yaml
         run: |
-          TAG="${{ github.ref_name }}-${{ needs.detect-changed-services.outputs.short_sha }}"
+          TAG="${{ needs.detect-changed-services.outputs.safe_ref }}-${{ needs.detect-changed-services.outputs.short_sha }}"
           echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
 
           cd kubernetes/base

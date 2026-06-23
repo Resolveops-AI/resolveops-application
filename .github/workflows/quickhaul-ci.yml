@@ -174,7 +174,7 @@ jobs:
   # ==========================================
   build-temp-images:
     name: trivy / Build & Scan Image (${{ matrix.service.image_name }})
-    if: github.event_name == \'pull_request\'
+    if: github.event_name == 'pull_request'
     needs: [setup, lint-testing, sca-snyk-scan, helm-validation]
     strategy:
       matrix:
@@ -208,7 +208,7 @@ jobs:
   # ==========================================
   build-dev-images:
     name: dev-publish / Build & Push Image (${{ matrix.service.image_name }})
-    if: github.event_name == \'push\' && github.ref == \'refs/heads/dev\'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     needs: [setup, lint-testing, sca-snyk-scan, helm-validation]
     strategy:
       matrix:
@@ -262,7 +262,7 @@ jobs:
   # MAIN FLOW (PROD IMAGES)
   # ==========================================
   calculate-semver:
-    if: github.event_name == \'push\' && github.ref == \'refs/heads/main\'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [lint-testing, sca-snyk-scan, helm-validation]
     runs-on: ubuntu-latest
     outputs:

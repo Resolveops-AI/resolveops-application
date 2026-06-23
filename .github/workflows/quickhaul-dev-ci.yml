@@ -1,0 +1,143 @@
+name: QuickHaul Dev CI
+# Trigger build
+
+on:
+  push:
+    branches:
+      - feature/dev
+    paths:
+      - 'quickhaul/**'
+      - '.github/workflows/quickhaul-dev-ci.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  ACR_NAME: ${{ vars.ACR_NAME }}
+  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+
+jobs:
+  detect-changed-services:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_services_json: ${{ steps.detect.outputs.changed_services_json }}
+      skip_build: ${{ steps.detect.outputs.skip_build }}
+      short_sha: ${{ steps.vars.outputs.short_sha }}
+      safe_ref: ${{ steps.vars.outputs.safe_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Calculate Variables
+        id: vars
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          SAFE_REF=$(echo "${{ github.ref_name }}" | tr '/' '-')
+          echo "safe_ref=$SAFE_REF" >> $GITHUB_OUTPUT
+      - name: Detect Changed Services (TEMPORARILY FORCED TO ALL)
+        id: detect
+        run: |
+          cat << 'EOF' > detect.py
+          import yaml, json
+          with open('.github/service-map/quickhaul-services.yml', 'r') as f:
+              service_map = yaml.safe_load(f)
+          
+          # FORCING ALL SERVICES TO BUILD FOR INITIAL DEPLOYMENT
+          changed_services = list(service_map.values())
+          
+          with open('output.json', 'w') as f:
+              json.dump(changed_services, f)
+          EOF
+          python3 -m pip install pyyaml
+          python3 detect.py
+          JSON_OUT=$(cat output.json)
+          if [ "$JSON_OUT" == "[]" ]; then
+             echo "skip_build=true" >> $GITHUB_OUTPUT
+             echo "changed_services_json=[{\"service_name\":\"dummy\",\"context_path\":\".\",\"dockerfile_path\":\"Dockerfile\",\"image_name\":\"dummy\",\"helm_values_tag_key\":\"dummy\"}]" >> $GITHUB_OUTPUT
+          else
+             echo "skip_build=false" >> $GITHUB_OUTPUT
+             echo "changed_services_json=$JSON_OUT" >> $GITHUB_OUTPUT
+          fi
+
+  lint-testing:
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Running generic linting for changed services"
+
+  sonar-scan:
+    name: SonarQube Scan (${{ matrix.service.image_name }})
+    needs: [detect-changed-services, lint-testing]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
+    secrets: inherit
+    with:
+      working_directory: ${{ matrix.service.context_path }}
+      run_sonar: true
+      run_snyk: false
+      run_trivy: false
+
+  snyk-scan:
+    name: Snyk Scan (${{ matrix.service.image_name }})
+    needs: [detect-changed-services, sonar-scan]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
+    secrets: inherit
+    with:
+      working_directory: ${{ matrix.service.context_path }}
+      run_sonar: false
+      run_snyk: true
+      run_trivy: false
+
+  build-trivy-push:
+    name: Build & Push Dev (${{ matrix.service.image_name }})
+    needs: [detect-changed-services, snyk-scan]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
+    secrets: inherit
+    with:
+      image_name: ${{ matrix.service.image_name }}
+      acr_name: ${{ vars.ACR_NAME }}
+      acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
+      dockerfile_path: ${{ matrix.service.dockerfile_path }}
+      context_path: ${{ matrix.service.context_path }}
+      image_tag: ${{ needs.detect-changed-services.outputs.safe_ref }}-${{ needs.detect-changed-services.outputs.short_sha }}
+      push_image: true
+
+  update-dev-helm-values:
+    needs: [detect-changed-services, build-trivy-push]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/dev
+      - name: Update values-dev.yaml
+        run: |
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          DEV_TAG="${{ needs.detect-changed-services.outputs.safe_ref }}-${{ needs.detect-changed-services.outputs.short_sha }}"
+          
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            yq e "${KEY} = \"${DEV_TAG}\"" -i quickhaul/helm/quickhaul/values-dev.yaml
+          done
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add quickhaul/helm/quickhaul/values-dev.yaml
+          git commit -m "chore: update quickhaul dev image tags [skip ci]" || echo "No changes to commit"
+          git push origin feature/dev
+

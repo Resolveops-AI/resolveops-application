@@ -183,8 +183,8 @@ jobs:
     secrets: inherit
     with:
       image_name: ${{ matrix.service.image_name }}
-      acr_name: ${{ env.ACR_NAME }}
-      acr_login_server: ${{ env.ACR_LOGIN_SERVER }}
+      acr_name: resolveopsacr03
+      acr_login_server: resolveopsacr03.azurecr.io
       dockerfile_path: ${{ matrix.service.dockerfile_path }}
       context_path: ${{ matrix.service.context_path }}
       image_tag: ${{ needs.setup.outputs.dev_image_tag }}

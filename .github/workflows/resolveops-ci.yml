@@ -11,7 +11,7 @@ on:
       - '.github/workflows/resolveops-ci.yml'
   push:
     branches:
-      - dev
+      - feature/dev
       - main
     paths:
       - 'services/**'
@@ -177,12 +177,3 @@ jobs:
           git commit -m "chore: update resolveops-ai image tags to $TAG [skip ci]" || echo "No changes to commit"
           git push origin ${{ github.ref_name }}
 
-  sync-argo-dev:
-    name: Sync ArgoCD resolveops-ai
-    needs: [update-kustomization]
-    if: github.event_name == 'push'
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/cd-reusable-template.yml@main
-    secrets: inherit
-    with:
-      argocd_app_name: resolveops-ai
-      argocd_server: ${{ vars.ARGOCD_SERVER }}

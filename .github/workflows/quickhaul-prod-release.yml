@@ -218,10 +218,3 @@ jobs:
           git commit -m "chore: release quickhaul $VERSION [skip ci]" || echo "No changes to commit"
           git push origin main
 
-  sync-argo-prod:
-    needs: [update-prod-helm-values]
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/cd-reusable-template.yml@main
-    secrets: inherit
-    with:
-      argocd_app_name: quickhaul-prod
-      argocd_server: ${{ vars.ARGOCD_SERVER }}

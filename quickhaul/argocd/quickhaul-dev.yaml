@@ -7,7 +7,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/Resolveops-AI/resolveops-application.git
-    targetRevision: dev
+    targetRevision: feature/dev
     path: quickhaul/helm/quickhaul
     helm:
       valueFiles:

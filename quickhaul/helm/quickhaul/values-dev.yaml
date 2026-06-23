@@ -4,31 +4,31 @@ global:
   imageRegistry: <ACR_LOGIN_SERVER>
 frontend:
   image:
-    tag: dev-placeholder
+    tag: dev-0aa61b4
   replicaCount: 1
 locationService:
   image:
-    tag: dev-placeholder
+    tag: dev-0aa61b4
   replicaCount: 1
 authService:
   image:
-    tag: dev-3d9b290
+    tag: dev-0aa61b4
   replicaCount: 1
 bookingService:
   image:
-    tag: dev-placeholder
+    tag: dev-0aa61b4
   replicaCount: 1
 notificationService:
   image:
-    tag: dev-placeholder
+    tag: dev-0aa61b4
   replicaCount: 1
 otpService:
   image:
-    tag: dev-placeholder
+    tag: dev-0aa61b4
   replicaCount: 1
 paymentService:
   image:
-    tag: dev-placeholder
+    tag: dev-0aa61b4
   replicaCount: 1
 config:
   mongoUri: mongodb://quickhaul-mongodb:27017

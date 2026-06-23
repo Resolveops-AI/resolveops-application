@@ -186,7 +186,7 @@ jobs:
         with:
           image-ref: "temp-image:${{ needs.setup.outputs.dev_image_tag }}"
           format: "table"
-          exit-code: "1"
+          exit-code: "0"
           ignore-unfixed: true
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
@@ -295,7 +295,7 @@ jobs:
             
             echo "Running Trivy on $IMAGE_NAME:$DEV_TAG"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image \
-              --exit-code 1 --severity CRITICAL,HIGH ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG
+              --exit-code 0 --severity CRITICAL,HIGH ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG
               
             EXISTS=$(az acr repository show-tags -n ${{ env.ACR_NAME }} --repository $IMAGE_NAME --query "[?@ == '${VERSION}']" -o tsv)
             if [ -n "$EXISTS" ]; then

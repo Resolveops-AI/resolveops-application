@@ -4,46 +4,37 @@ This document details the exact branching flow, PR validation, semantic version 
 
 ## Branching Model
 
-- `dev`: Development integration branch. Pushes trigger dev image builds.
+- `dev`: Development integration branch. Direct pushes to this branch run code and Helm validation, and build/push dev images **only for changed services**.
 - `main`: Protected production branch. Direct pushes are blocked.
 
 ### Development Flow (Push to `dev`)
-This is the dev image creation flow.
-1. **Trigger**: Push to the `dev` branch.
-2. **Lint Testing**: Runs basic codebase linting and testing.
-3. **Security Scan**: Runs SAST and Snyk dependency scanning.
+1. **Trigger**: Code is pushed to `dev`.
+2. **Changed Service Detection**: The pipeline identifies which microservices have changed.
+3. **Scan**: Runs Sonar and Snyk security scans for changed services.
 4. **Validation**: Helm templates are linted and tested for dev/prod.
-5. **Build Dev Images**: Builds Docker images locally.
-6. **Trivy Image Scan**: Scans the locally built images. Fails the workflow if HIGH or CRITICAL vulnerabilities are found.
-7. **Push**: Dev images are pushed to ACR (tagged as `dev-<short-sha>`) ONLY if Trivy passes.
-8. **GitOps Update**: Updates `values-dev.yaml` with the new dev tag ONLY after successful ACR push and commits back to `dev` using `[skip ci]`.
-9. **Deploy**: Argo CD automatically deploys the dev images to the `quickhaul-dev` namespace tracking the `dev` branch.
-*(Note: Frequent dev pushes create multiple `dev-*` tags, so regular ACR cleanup/retention policies are recommended).*
+5. **Build Dev Images**: Builds Docker images tagged as `dev-<short-sha>` **only for changed services**.
+6. **Push**: Dev images are pushed to ACR.
+7. **GitOps Update**: Updates `values-dev.yaml` with the new dev tag for the changed services and commits back to the `dev` branch using `[skip ci]`.
+8. **Deploy**: Argo CD automatically deploys the dev images to the `quickhaul-dev` namespace tracking the `dev` branch.
 
-### Pull Request Flow (PR to `main`)
-1. **Trigger**: A Pull Request is opened, synchronized, or reopened targeting `main`.
-2. **Lint Testing**: Runs basic codebase linting and testing.
-3. **Security Scan**: Runs SAST and Snyk dependency scanning.
-4. **Validation**: Helm templates are linted and tested for dev/prod.
-   - *No image build.*
-   - *No ACR push.*
-   - *No Helm update.*
+### Pull Request Flow (PR from `dev` to `main`)
+1. **Trigger**: A Pull Request is opened, synchronized, or reopened.
+2. **Changed Service Detection**: The pipeline identifies which microservices have changed.
+3. **Scan**: Runs Sonar and Snyk security scans for changed services.
+4. **Validation**: Helm templates are linted and tested.
+5. **Verification Only**: NO images are built, pushed, or deployed. This flow only blocks bad code from merging.
 
 ### Production Release Flow (Merge to `main`)
-This is the production release flow after PR approval and merge.
 1. **Trigger**: PR is approved and merged into `main`.
-2. **Lint Testing**: Runs basic codebase linting and testing again.
-3. **Security Scan**: Runs SAST and Snyk scanning again.
+2. **Changed Service Detection**: Identifies which microservices have changed.
+3. **Scan**: Runs security scans for changed services.
 4. **Validation**: Helm templates are tested again.
-5. **Semantic Versioning**: Calculates the new semantic version (`vX.Y.Z`) from commit messages.
-6. **Tag Verification**: Checks ACR to ensure `vX.Y.Z` does not already exist. Fails the workflow if it does.
-7. **Image Promotion Prep**: Reads the tested `dev-<short-sha>` tag from `values-dev.yaml` and pulls the image from ACR.
-8. **Trivy Image Scan**: Scans the pulled dev image again.
-9. **Approval Gate**: Pauses execution and waits for a manual approval on the GitHub `production` Environment.
-10. **Release**: After approval, retags the `dev-<short-sha>` image to `vX.Y.Z` and pushes the final semantic images to ACR.
-11. **GitOps Update**: Updates `values-prod.yaml` with the semantic version ONLY after successful semantic image push and commits to `main` using `[skip ci]`.
-12. **Git Tag**: Creates a Git tag for `vX.Y.Z`.
-13. **Deploy**: Argo CD automatically deploys to the `quickhaul-prod` namespace tracking the `main` branch.
+5. **Semantic Versioning**: Calculates the new semantic version (`vX.Y.Z`) from commit messages using the Conventional Commits specification.
+6. **Approval Gate**: Pauses execution and waits for a manual approval on the GitHub `production` Environment.
+7. **Release**: Retags the dev candidate images (e.g. `dev-<short-sha>`) as `vX.Y.Z` and pushes the final semantic images to ACR **only for changed services**.
+8. **GitOps Update**: Updates `values-prod.yaml` with the semantic version for changed services and commits to `main` using `[skip ci]`.
+9. **Git Tag**: Creates a Git tag for `vX.Y.Z`.
+10. **Deploy**: Argo CD automatically deploys to the `quickhaul-prod` namespace tracking the `main` branch.
 
 ## Manual GitHub Settings Required
 
@@ -58,7 +49,10 @@ To enforce this flow, the following GitHub Repository settings must be manually 
 2. **Environments**:
    - Create an environment named `production`.
    - Add required reviewers to the `production` environment to enforce the manual release gate.
-3. **Azure OIDC Federated Credentials**:
-   - `repo:Resolveops-AI/resolveops-application:pull_request`
-   - `repo:Resolveops-AI/resolveops-application:ref:refs/heads/main`
-   - `repo:Resolveops-AI/resolveops-application:ref:refs/heads/dev`
+
+## Azure OIDC Federated Credentials
+
+Since the CI/CD pipeline pushes to ACR on both `pull_request` and `push` to `main`, the Azure AD Application (Service Principal) used for OIDC authentication requires the following federated credentials:
+- `repo:ResolveOps-AI/resolveops-application:pull_request`
+- `repo:ResolveOps-AI/resolveops-application:ref:refs/heads/main`
+- `repo:ResolveOps-AI/resolveops-application:ref:refs/heads/dev`

@@ -1,37 +1,37 @@
 # GitOps and CI/CD Flow
 
-This document details the CI/CD execution flow mapping from code commit to Kubernetes deployment via Argo CD.
+This document details the CI/CD execution flow mapping from code commit to Kubernetes deployment via Argo CD. Our workflows use a **Monorepo Changed-Service Strategy**.
 
 ## 1. Push to `dev`
-- **Validation**: Runs lint testing, SAST, Snyk, and Helm validation.
-- **Image Build**: Docker dev images are built locally.
-- **Security Scan**: `aquasecurity/trivy-action` scans the newly built images. Fails the workflow if `HIGH` or `CRITICAL` vulnerabilities exist.
-- **Image Push**: If the scan passes, images are pushed to ACR with the tag format: `dev-<short-sha>`.
-- **GitOps Commit**: ONLY AFTER the images are successfully pushed, the `quickhaul/helm/quickhaul/values-dev.yaml` file is updated with the new `dev-<short-sha>` tag. The GitHub Action commits this change back to the source branch (`dev`) using `[skip ci]`.
-- **Argo CD Dev Deployment**: Argo CD's `quickhaul-dev` Application is configured with `targetRevision: dev`. When the bot commits to `dev`, Argo CD detects the updated `values-dev.yaml` and deploys the new images to the `quickhaul-dev` namespace in the AKS cluster.
+- **Changed Service Detection**: The CI pipeline calculates which services changed based on `git diff` and `.github/service-map/quickhaul-services.yml`.
+- **Validation**: Sonar, Snyk, and Helm validations run.
+- **Images**: Images are built and pushed to ACR with the tag `dev-<short-sha>` **only for changed services**.
+- **GitOps Commit**: The `quickhaul/helm/quickhaul/values-dev.yaml` file is updated with the new `dev-<short-sha>` tag **only for the changed services**. The GitHub Action commits this change back to `dev` using `[skip ci]`.
+- **Deployment**: Argo CD's `quickhaul-dev` Application is configured with `targetRevision: dev`. When the bot commits to `dev`, Argo CD detects the updated `values-dev.yaml` and deploys.
 
 ## 2. Pull Request (`dev` → `main`)
 When a PR is opened targeting `main`:
-- **Validation**: Runs lint testing, SAST, Snyk, and Helm validation to ensure code quality before merging.
-- **Images**: No images are built.
-- **Registry**: No ACR pushes occur.
-- **Helm**: No updates to `values-dev.yaml`.
-- **Deployment**: No deployment changes happen.
+- **Changed Service Detection**: Identifies changed services.
+- **Security Validation**: `ci-reusable-template.yml` runs SonarQube and Snyk scans for changed services.
+- **Manifest Validation**: `helm lint` and `helm template` dry-runs are executed.
+- **Image Build/Push**: **No** images are built or pushed.
+- **GitOps Commit**: **No** changes to Helm values are made.
+- **Deployment**: **No** deployment happens. This is validation only.
 
 ## 3. Merge to `main`
 When the PR is approved and merged:
-- **Secondary Validation**: Lint testing, SAST, Snyk, and Helm validation run again.
+- **Changed Service Detection**: Identifies changed services.
+- **Secondary Scan**: Security and Helm validations run again.
 - **Semantic Versioning**: `github-tag-action` analyzes Conventional Commits to determine the new `vX.Y.Z` version tag.
-- **Tag Check**: Validates that `vX.Y.Z` does not already exist in ACR.
-- **Promotion Prep**: Reads the tested `dev-<short-sha>` tag from `values-dev.yaml` and pulls the image from ACR.
-- **Candidate Scan**: Trivy scans the dev image again to ensure no newly disclosed vulnerabilities exist before production release.
 - **Approval Gate**: The workflow pauses at the `production` GitHub Environment step. A reviewer must manually approve.
-- **Production Retag**: After approval, `az acr import` is used to efficiently retag the `dev-<short-sha>` image in ACR to `vX.Y.Z`.
-- **GitOps Commit**: ONLY AFTER successful push, `quickhaul/helm/quickhaul/values-prod.yaml` is updated with `vX.Y.Z` and committed directly to `main` with `[skip ci]`. A Git release tag is also created.
+- **Production Retag**: After approval, `az acr import` is used to retag the dev image in ACR to `vX.Y.Z` **only for changed services**.
+- **GitOps Commit**: The `quickhaul/helm/quickhaul/values-prod.yaml` is updated with `vX.Y.Z` **only for the changed services** and committed directly to `main` with `[skip ci]`. A Git release tag is also created.
 - **Argo CD Prod Deployment**: Argo CD's `quickhaul-prod` Application tracks `targetRevision: main`. It detects the new `vX.Y.Z` tag in `values-prod.yaml` and deploys to the `quickhaul-prod` namespace.
 
-## Manual GitHub Settings & OIDC
-To enforce this flow, manual configuration is required in GitHub:
-- Main branch protection rules (require PR, require approval).
-- A `production` Environment configured with required reviewers.
-- Azure OIDC Federated Credentials for `repo:Resolveops-AI/resolveops-application:pull_request`, `repo:Resolveops-AI/resolveops-application:ref:refs/heads/main`, and `repo:Resolveops-AI/resolveops-application:ref:refs/heads/dev`.
+## OIDC Azure Authentication Requirement
+> **Important Note:** To allow the GitHub Actions Pull Request flow to authenticate with Azure securely via OIDC, an additional Federated Credential must be added to the Azure App Registration used by GitHub Actions. The Entity Type must be **Pull request** (which creates a subject like `repo:Resolveops-AI/resolveops-application:pull_request`).
+
+Since the CI/CD pipeline pushes to ACR on both `push` to `dev` and `push` to `main`, the Azure AD Application (Service Principal) used for OIDC authentication requires the following federated credentials:
+- `repo:ResolveOps-AI/resolveops-application:pull_request`
+- `repo:ResolveOps-AI/resolveops-application:ref:refs/heads/main`
+- `repo:ResolveOps-AI/resolveops-application:ref:refs/heads/dev`

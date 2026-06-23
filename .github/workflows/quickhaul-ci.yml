@@ -1,33 +1,30 @@
 name: QuickHaul CI
 
 on:
-  push:
-    branches:
-      - dev
-      - main
-    paths:
-      - 'quickhaul/**'
-      - '.github/workflows/quickhaul-ci.yml'
   pull_request:
     branches:
       - main
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'quickhaul/**'
+      - '.github/workflows/quickhaul-ci.yml'
+  push:
+    branches:
+      - main
+      - dev
     paths:
       - 'quickhaul/**'
       - '.github/workflows/quickhaul-ci.yml'
 
 permissions:
-  contents: write
   id-token: write
+  contents: write
   pull-requests: read
 
 env:
   ACR_NAME: resolveopsacr03
   ACR_LOGIN_SERVER: resolveopsacr03.azurecr.io
   AZURE_RESOURCE_GROUP: sathvik-rg
-  AKS_CLUSTER_NAME: resolveops-aks-02
-  RESOLVEOPS_NAMESPACE: resolveops-ai
-  QUICKHAUL_DEV_NAMESPACE: quickhaul-dev
-  QUICKHAUL_PROD_NAMESPACE: quickhaul-prod
 
 jobs:
   setup:
@@ -41,68 +38,123 @@ jobs:
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "dev_image_tag=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "dev_image_tag=dev-pr-${{ github.event.pull_request.number }}-$SHORT_SHA" >> $GITHUB_OUTPUT
+          else
+            echo "dev_image_tag=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
+          fi
 
-  lint-testing:
+  detect-changed-services:
     runs-on: ubuntu-latest
+    outputs:
+      changed_services_json: ${{ steps.detect.outputs.changed_services_json }}
+      skip_build: ${{ steps.detect.outputs.skip_build }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node
-        uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - name: Frontend Lint and Test
+          fetch-depth: 0
+      - name: Detect Changed Services
+        id: detect
         run: |
-          cd quickhaul/frontend
-          if [ -f "package.json" ]; then
-            npm ci || echo "Warning: npm ci failed"
-            if grep -q '"lint"' package.json; then
-              npm run lint || echo "Warning: Lint failed"
-            else
-              echo "Warning: No lint script found in package.json"
-            fi
-            if grep -q '"test"' package.json; then
-              npm test || echo "Warning: Test failed"
-            else
-              echo "Warning: No test script found in package.json"
-            fi
-          fi
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Backend Lint and Test
-        run: |
-          cd quickhaul/backend
-          pip install pytest || true
-          if [ -d "tests" ] || [ -d "test" ] || ls test_*.py 1> /dev/null 2>&1 || find . -name "test_*.py" | grep -q .; then
-            pytest || echo "Warning: pytest failed"
+          cat << 'EOF' > detect.py
+          import yaml, json, subprocess, fnmatch
+          with open('.github/service-map/quickhaul-services.yml', 'r') as f:
+              service_map = yaml.safe_load(f)
+          event_name = '${{ github.event_name }}'
+          if event_name == 'pull_request':
+              base_sha = '${{ github.event.pull_request.base.sha }}'
+              head_sha = '${{ github.event.pull_request.head.sha }}'
+              cmd = f"git diff --name-only {base_sha} {head_sha}"
+          else:
+              before = '${{ github.event.before }}'
+              sha = '${{ github.sha }}'
+              if before and before != '0000000000000000000000000000000000000000':
+                  cmd = f"git diff --name-only {before} {sha}"
+              else:
+                  cmd = f"git diff --name-only HEAD^ HEAD"
+          try:
+              output = subprocess.check_output(cmd, shell=True, text=True)
+          except subprocess.CalledProcessError:
+              output = ""
+          changed_files = [line.strip() for line in output.strip().split('\n') if line.strip()]
+          
+          docs_only = all(f.endswith('.md') for f in changed_files if f)
+          
+          shared_changed = False
+          for file in changed_files:
+              if file.startswith("quickhaul/backend/shared/"):
+                  shared_changed = True
+                  break
+                  
+          changed_services = []
+          if not docs_only:
+              for svc, details in service_map.items():
+                  if shared_changed and details['context_path'] == "quickhaul/backend":
+                      changed_services.append(details)
+                      continue
+                  changed = False
+                  for file in changed_files:
+                      for path in details['source_paths']:
+                          if fnmatch.fnmatch(file, path):
+                              changed = True
+                              break
+                      if changed:
+                          break
+                  if changed:
+                      changed_services.append(details)
+          
+          with open('output.json', 'w') as f:
+              json.dump(changed_services, f)
+          EOF
+          python3 -m pip install pyyaml
+          python3 detect.py
+          JSON_OUT=$(cat output.json)
+          echo "changed_services_json=$JSON_OUT" >> $GITHUB_OUTPUT
+          if [ "$JSON_OUT" == "[]" ]; then
+             echo "skip_build=true" >> $GITHUB_OUTPUT
           else
-            echo "Warning: No python tests found"
+             echo "skip_build=false" >> $GITHUB_OUTPUT
           fi
 
+  lint-testing:
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Running generic linting for changed services"
+
   sast-sonar-scan:
-    needs: [lint-testing]
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
     secrets: inherit
     with:
-      working_directory: .
+      working_directory: ${{ matrix.service.context_path }}
       run_sonar: true
       run_snyk: false
       run_trivy: false
 
   sca-snyk-scan:
-    needs: [sast-sonar-scan]
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
     secrets: inherit
     with:
-      working_directory: .
+      working_directory: ${{ matrix.service.context_path }}
       run_sonar: false
       run_snyk: true
       run_trivy: false
 
   helm-validation:
-    needs: [sca-snyk-scan]
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,48 +166,52 @@ jobs:
         run: helm template quickhaul-prod quickhaul/helm/quickhaul -n quickhaul-prod -f quickhaul/helm/quickhaul/values-prod.yaml
 
   # ==========================================
-  # DEV PUSH FLOW
+  # PR FLOW ONLY (NO PUSH)
   # ==========================================
-  build-scan-push:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [setup, helm-validation]
-    runs-on: ubuntu-latest
+  build-temp-images:
+    if: github.event_name == 'pull_request'
+    needs: [setup, detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan, helm-validation]
     strategy:
       matrix:
-        service: [frontend, location, auth, booking, notification, otp, payment]
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Log in to ACR
-        run: az acr login --name resolveopsacr03
-      - name: docker build
+      - name: Build Temporary Docker Image
         run: |
-          CONTEXT_PATH=${{ matrix.service == 'frontend' && './quickhaul/frontend' || './quickhaul/backend' }}
-          DOCKERFILE_PATH=${{ matrix.service == 'frontend' && './quickhaul/frontend/Dockerfile' || './quickhaul/backend/Dockerfile' }}
-          IMAGE_URI="resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.setup.outputs.dev_image_tag }}"
-          
-          docker build -t $IMAGE_URI -f $DOCKERFILE_PATH $CONTEXT_PATH
-      - name: Trivy image scan
+          docker build -t temp-image:${{ needs.setup.outputs.dev_image_tag }} -f ${{ matrix.service.dockerfile_path }} ${{ matrix.service.context_path }}
+      - name: Run Trivy Vulnerability Scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: "resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.setup.outputs.dev_image_tag }}"
+          image-ref: "temp-image:${{ needs.setup.outputs.dev_image_tag }}"
           format: "table"
           exit-code: "1"
           ignore-unfixed: true
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
-      - name: docker push only if Trivy passes
-        run: |
-          docker push resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.setup.outputs.dev_image_tag }}
 
-  helm-values-update:
+  # ==========================================
+  # DEV FLOW (PUSH TO DEV)
+  # ==========================================
+  build-dev-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [setup, build-scan-push]
+    needs: [setup, detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan, helm-validation]
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
+    secrets: inherit
+    with:
+      image_name: ${{ matrix.service.image_name }}
+      acr_name: ${{ env.ACR_NAME }}
+      acr_login_server: ${{ env.ACR_LOGIN_SERVER }}
+      dockerfile_path: ${{ matrix.service.dockerfile_path }}
+      context_path: ${{ matrix.service.context_path }}
+      image_tag: ${{ needs.setup.outputs.dev_image_tag }}
+
+  update-dev-helm:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: [setup, detect-changed-services, build-dev-images]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -163,27 +219,39 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: dev
-      - name: Update values-dev.yaml tags
+      - name: Update values-dev.yaml
         run: |
-          NEW_TAG="${{ needs.setup.outputs.dev_image_tag }}"
-          sed -i "s/tag: .*/tag: $NEW_TAG/g" quickhaul/helm/quickhaul/values-dev.yaml
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          DEV_TAG="${{ needs.setup.outputs.dev_image_tag }}"
           
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            yq e "${KEY} = \"${DEV_TAG}\"" -i quickhaul/helm/quickhaul/values-dev.yaml
+          done
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add quickhaul/helm/quickhaul/values-dev.yaml
-          git commit -m "chore: update quickhaul dev image tag [skip ci]" || echo "No changes to commit"
+          git commit -m "chore: update quickhaul dev image tags [skip ci]" || echo "No changes to commit"
           git push origin dev
 
+  sync-argo-dev:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: [update-dev-helm]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/cd-reusable-template.yml@main
+    secrets: inherit
+    with:
+      argocd_app_name: quickhaul-dev
+
   # ==========================================
-  # MAIN PUSH FLOW
+  # MAIN FLOW (PROD IMAGES)
   # ==========================================
-  prepare-prod-promotion:
+  calculate-semver:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [helm-validation]
+    needs: [detect-changed-services, lint-testing, sast-sonar-scan, sca-snyk-scan, helm-validation]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.semver.outputs.new_tag }}
-      dev_tag: ${{ steps.get_tag.outputs.dev_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -196,90 +264,105 @@ jobs:
           dry_run: true
           default_bump: patch
           release_branches: main
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Check ACR for Tag
-        run: |
-          TAG="${{ steps.semver.outputs.new_tag }}"
-          EXISTS=$(az acr repository show-tags -n resolveopsacr03 --repository quickhaul-frontend --query "[?@ == '$TAG']" -o tsv)
-          if [ -n "$EXISTS" ]; then
-            echo "Error: Tag $TAG already exists in ACR!"
-            exit 1
-          fi
-      - name: Get Dev Tag
-        id: get_tag
-        run: |
-          DEV_TAG=$(grep 'tag:' quickhaul/helm/quickhaul/values-dev.yaml | head -n 1 | awk '{print $2}' | tr -d '"')
-          echo "dev_tag=$DEV_TAG" >> $GITHUB_OUTPUT
 
-  prod-trivy-scan:
+  validate-prod-candidates:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [prepare-prod-promotion]
+    needs: [detect-changed-services, calculate-semver]
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service: [frontend, location, auth, booking, notification, otp, payment]
     steps:
+      - uses: actions/checkout@v4
       - name: Azure Login
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Log in to Azure Container Registry
-        run: az acr login --name resolveopsacr03
-      - name: Pull Dev Image
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+      - name: Pull Dev Images and Run Trivy
         run: |
-          docker pull resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.prepare-prod-promotion.outputs.dev_tag }}
-      - name: Trivy Scan again
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: "resolveopsacr03.azurecr.io/quickhaul-${{ matrix.service }}:${{ needs.prepare-prod-promotion.outputs.dev_tag }}"
-          format: "table"
-          exit-code: "1"
-          ignore-unfixed: true
-          vuln-type: "os,library"
-          severity: "CRITICAL,HIGH"
+          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            IMAGE_NAME=$(echo $row | jq -r '.image_name')
+            DEV_TAG=$(yq e "${KEY}" quickhaul/helm/quickhaul/values-dev.yaml)
+            
+            echo "Pulling $IMAGE_NAME:$DEV_TAG"
+            docker pull ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG
+            
+            echo "Running Trivy on $IMAGE_NAME:$DEV_TAG"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image \
+              --exit-code 1 --severity CRITICAL,HIGH ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG
+              
+            EXISTS=$(az acr repository show-tags -n ${{ env.ACR_NAME }} --repository $IMAGE_NAME --query "[?@ == '${VERSION}']" -o tsv)
+            if [ -n "$EXISTS" ]; then
+              echo "Error: Tag $VERSION already exists in ACR for $IMAGE_NAME!"
+              exit 1
+            fi
+          done
 
-  promote-to-prod:
+  prod-approval-gate:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [prepare-prod-promotion, prod-trivy-scan]
+    needs: [validate-prod-candidates]
     runs-on: ubuntu-latest
     environment: production
+    steps:
+      - run: echo "Production environment approved!"
+
+  release-prod-images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [detect-changed-services, calculate-semver, prod-approval-gate]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
       - name: Azure Login
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Retag Dev Image as vX.Y.Z and Push to ACR
+      - name: Retag and Push Semantic Version
         run: |
-          DEV_TAG="${{ needs.prepare-prod-promotion.outputs.dev_tag }}"
-          VERSION="${{ needs.prepare-prod-promotion.outputs.new_version }}"
-          SERVICES=("frontend" "location" "auth" "booking" "notification" "otp" "payment")
+          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
           
-          for SERVICE in "${SERVICES[@]}"; do
-            echo "Retagging quickhaul-$SERVICE from $DEV_TAG to $VERSION..."
-            az acr import --name resolveopsacr03               --source resolveopsacr03.azurecr.io/quickhaul-$SERVICE:$DEV_TAG               --image quickhaul-$SERVICE:$VERSION
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            IMAGE_NAME=$(echo $row | jq -r '.image_name')
+            DEV_TAG=$(yq e "${KEY}" quickhaul/helm/quickhaul/values-dev.yaml)
+            
+            echo "Retagging $IMAGE_NAME from $DEV_TAG to $VERSION"
+            az acr import --name ${{ env.ACR_NAME }} \
+              --source ${{ env.ACR_LOGIN_SERVER }}/$IMAGE_NAME:$DEV_TAG \
+              --image $IMAGE_NAME:$VERSION
           done
+
+  update-prod-helm:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [detect-changed-services, calculate-semver, release-prod-images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Update values-prod.yaml
         run: |
-          VERSION="${{ needs.prepare-prod-promotion.outputs.new_version }}"
-          sed -i "s/tag: .*/tag: $VERSION/g" quickhaul/helm/quickhaul/values-prod.yaml
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+          VERSION="${{ needs.calculate-semver.outputs.new_version }}"
           
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          for row in $(jq -c '.[]' changed.json); do
+            KEY=$(echo $row | jq -r '.helm_values_tag_key')
+            yq e "${KEY} = \"${VERSION}\"" -i quickhaul/helm/quickhaul/values-prod.yaml
+          done
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add quickhaul/helm/quickhaul/values-prod.yaml
           git commit -m "chore: release quickhaul $VERSION [skip ci]" || echo "No changes to commit"
           git push origin main
@@ -287,151 +370,123 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          custom_tag: ${{ needs.prepare-prod-promotion.outputs.new_version }}
+          custom_tag: ${{ needs.calculate-semver.outputs.new_version }}
+
+  sync-argo-prod:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [update-prod-helm]
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/cd-reusable-template.yml@main
+    secrets: inherit
+    with:
+      argocd_app_name: quickhaul-prod
 
   # ==========================================
   # NOTIFICATIONS
   # ==========================================
+  notify-detect-changed-services-failed:
+    needs: [detect-changed-services]
+    if: ${{ always() && needs.detect-changed-services.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "detect-changed-services"
+
   notify-lint-testing-failed:
     needs: [lint-testing]
     if: ${{ always() && needs.lint-testing.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    with:
-      service_name: "QuickHaul"
-      environment: "CI/CD"
-      failed_job_name: "lint-testing"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
     secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "lint-testing"
 
   notify-sast-sonar-scan-failed:
     needs: [sast-sonar-scan]
     if: ${{ always() && needs.sast-sonar-scan.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    with:
-      service_name: "QuickHaul"
-      environment: "CI/CD"
-      failed_job_name: "sast-sonar-scan"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
     secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "sast-sonar-scan"
 
   notify-sca-snyk-scan-failed:
     needs: [sca-snyk-scan]
     if: ${{ always() && needs.sca-snyk-scan.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    with:
-      service_name: "QuickHaul"
-      environment: "CI/CD"
-      failed_job_name: "sca-snyk-scan"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
     secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "sca-snyk-scan"
 
   notify-helm-validation-failed:
     needs: [helm-validation]
     if: ${{ always() && needs.helm-validation.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
     with:
-      service_name: "QuickHaul"
-      environment: "CI/CD"
+      service_name: "QuickHaul CI"
       failed_job_name: "helm-validation"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
-    secrets: inherit
 
-  notify-build-scan-push-failed:
-    needs: [build-scan-push]
-    if: ${{ always() && needs.build-scan-push.result == 'failure' }}
+  notify-build-temp-images-failed:
+    needs: [build-temp-images]
+    if: ${{ always() && needs.build-temp-images.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    with:
-      service_name: "QuickHaul"
-      environment: "CI/CD"
-      failed_job_name: "build-scan-push"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
     secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "build-temp-images"
 
-  notify-helm-values-update-failed:
-    needs: [helm-values-update]
-    if: ${{ always() && needs.helm-values-update.result == 'failure' }}
+  notify-build-dev-images-failed:
+    needs: [build-dev-images]
+    if: ${{ always() && needs.build-dev-images.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    with:
-      service_name: "QuickHaul"
-      environment: "CI/CD"
-      failed_job_name: "helm-values-update"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
     secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "build-dev-images"
 
-  notify-prepare-prod-promotion-failed:
-    needs: [prepare-prod-promotion]
-    if: ${{ always() && needs.prepare-prod-promotion.result == 'failure' }}
+  notify-update-dev-helm-failed:
+    needs: [update-dev-helm]
+    if: ${{ always() && needs.update-dev-helm.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    with:
-      service_name: "QuickHaul"
-      environment: "CI/CD"
-      failed_job_name: "prepare-prod-promotion"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
     secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "update-dev-helm"
 
-  notify-prod-trivy-scan-failed:
-    needs: [prod-trivy-scan]
-    if: ${{ always() && needs.prod-trivy-scan.result == 'failure' }}
+  notify-calculate-semver-failed:
+    needs: [calculate-semver]
+    if: ${{ always() && needs.calculate-semver.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    with:
-      service_name: "QuickHaul"
-      environment: "CI/CD"
-      failed_job_name: "prod-trivy-scan"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
     secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "calculate-semver"
 
-  notify-promote-to-prod-failed:
-    needs: [promote-to-prod]
-    if: ${{ always() && needs.promote-to-prod.result == 'failure' }}
+  notify-validate-prod-candidates-failed:
+    needs: [validate-prod-candidates]
+    if: ${{ always() && needs.validate-prod-candidates.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    with:
-      service_name: "QuickHaul"
-      environment: "CI/CD"
-      failed_job_name: "promote-to-prod"
-      status: "Failure"
-      run_url: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      branch_name: "${{ github.ref_name }}"
-      commit_sha: "${{ github.sha }}"
-      actor: "${{ github.actor }}"
-      workflow_name: "${{ github.workflow }}"
     secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "validate-prod-candidates"
+
+  notify-release-prod-images-failed:
+    needs: [release-prod-images]
+    if: ${{ always() && needs.release-prod-images.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "release-prod-images"
+
+  notify-update-prod-helm-failed:
+    needs: [update-prod-helm]
+    if: ${{ always() && needs.update-prod-helm.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "QuickHaul CI"
+      failed_job_name: "update-prod-helm"

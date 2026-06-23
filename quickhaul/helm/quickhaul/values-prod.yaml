@@ -1,7 +1,7 @@
 namespaceOverride: quickhaul-prod
 replicaCount: 2
 global:
-  imageRegistry: <ACR_LOGIN_SERVER>
+  imageRegistry: resolveopsacr05.azurecr.io
 frontend:
   image:
     tag: v0.0.0

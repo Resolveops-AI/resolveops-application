@@ -25,16 +25,16 @@ images:
 - name: resolveopsacr05.azurecr.io/ai-rca-service
   newTag: "4"
 - name: resolveopsacr05.azurecr.io/api-gateway-service
-  newTag: "2"
-- name: resolveopsacr05.azurecr.io/auth-service
   newTag: "6"
+- name: resolveopsacr05.azurecr.io/auth-service
+  newTag: "4"
 - name: resolveopsacr05.azurecr.io/aws-intelligence-service
   newTag: "4"
 - name: resolveopsacr05.azurecr.io/azure-intelligence-service
-  newTag: "2"
+  newTag: "4"
 - name: resolveopsacr05.azurecr.io/resolveops-frontend
   newTag: "4"
 - name: resolveopsacr05.azurecr.io/github-intelligence-service
   newTag: "4"
 - name: resolveopsacr05.azurecr.io/notification-service
-  newTag: "2"
+  newTag: "4"

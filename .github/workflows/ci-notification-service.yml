@@ -6,14 +6,14 @@ on:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-notification-service.yml'
+      - '.github/workflows/ci-notification-service.yml'
       - 'services/notification-service/**'
   pull_request:
     branches:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-notification-service.yml'
+      - '.github/workflows/ci-notification-service.yml'
       - 'services/notification-service/**'
 permissions:
   contents: write

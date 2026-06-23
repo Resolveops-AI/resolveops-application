@@ -6,7 +6,7 @@ on:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-quickhaul-otp.yml'
+      - '.github/workflows/ci-quickhaul-otp.yml'
       - 'quickhaul/backend/services/otp_service/**'
       - 'quickhaul/backend/shared/**'
   pull_request:
@@ -14,7 +14,7 @@ on:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-quickhaul-otp.yml'
+      - '.github/workflows/ci-quickhaul-otp.yml'
       - 'quickhaul/backend/services/otp_service/**'
       - 'quickhaul/backend/shared/**'
 permissions:

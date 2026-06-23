@@ -6,14 +6,14 @@ on:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-resolveops-frontend.yml'
+      - '.github/workflows/ci-resolveops-frontend.yml'
       - 'frontend/**'
   pull_request:
     branches:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-resolveops-frontend.yml'
+      - '.github/workflows/ci-resolveops-frontend.yml'
       - 'frontend/**'
 permissions:
   contents: write

@@ -6,14 +6,14 @@ on:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-ai-rca-service.yml'
+      - '.github/workflows/ci-ai-rca-service.yml'
       - 'services/ai-rca-service/**'
   pull_request:
     branches:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-ai-rca-service.yml'
+      - '.github/workflows/ci-ai-rca-service.yml'
       - 'services/ai-rca-service/**'
 permissions:
   contents: write

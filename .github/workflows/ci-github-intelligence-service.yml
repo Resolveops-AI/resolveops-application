@@ -6,14 +6,14 @@ on:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-github-intelligence-service.yml'
+      - '.github/workflows/ci-github-intelligence-service.yml'
       - 'services/github-intelligence-service/**'
   pull_request:
     branches:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-github-intelligence-service.yml'
+      - '.github/workflows/ci-github-intelligence-service.yml'
       - 'services/github-intelligence-service/**'
 permissions:
   contents: write

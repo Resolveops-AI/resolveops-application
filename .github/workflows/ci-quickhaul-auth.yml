@@ -6,7 +6,7 @@ on:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-quickhaul-auth.yml'
+      - '.github/workflows/ci-quickhaul-auth.yml'
       - 'quickhaul/backend/services/auth_service/**'
       - 'quickhaul/backend/shared/**'
   pull_request:
@@ -14,7 +14,7 @@ on:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-quickhaul-auth.yml'
+      - '.github/workflows/ci-quickhaul-auth.yml'
       - 'quickhaul/backend/services/auth_service/**'
       - 'quickhaul/backend/shared/**'
 permissions:

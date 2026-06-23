@@ -6,7 +6,7 @@ on:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-quickhaul-booking.yml'
+      - '.github/workflows/ci-quickhaul-booking.yml'
       - 'quickhaul/backend/services/booking_service/**'
       - 'quickhaul/backend/shared/**'
   pull_request:
@@ -14,7 +14,7 @@ on:
       - feature/dev
       - main
     paths:
-      - '.github/workflows\ci-quickhaul-booking.yml'
+      - '.github/workflows/ci-quickhaul-booking.yml'
       - 'quickhaul/backend/services/booking_service/**'
       - 'quickhaul/backend/shared/**'
 permissions:

@@ -12,7 +12,7 @@ locationService:
   replicaCount: 1
 authService:
   image:
-    tag: dev-placeholder
+    tag: dev-3d9b290
   replicaCount: 1
 bookingService:
   image:

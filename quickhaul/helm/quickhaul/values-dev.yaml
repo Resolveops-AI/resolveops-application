@@ -8,27 +8,27 @@ frontend:
   replicaCount: 1
 locationService:
   image:
-    tag: v1.0.1
+    tag: "8"
   replicaCount: 1
 authService:
   image:
-    tag: v1.0.1
+    tag: "8"
   replicaCount: 1
 bookingService:
   image:
-    tag: v1.0.1
+    tag: "8"
   replicaCount: 1
 notificationService:
   image:
-    tag: v1.0.1
+    tag: "8"
   replicaCount: 1
 otpService:
   image:
-    tag: v1.0.1
+    tag: "8"
   replicaCount: 1
 paymentService:
   image:
-    tag: v1.0.1
+    tag: "8"
   replicaCount: 1
 config:
   mongoUri: mongodb://quickhaul-mongodb:27017

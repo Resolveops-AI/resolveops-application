@@ -23,7 +23,7 @@ spec:
         fsGroup: 10001
       containers:
       - name: api-gateway-service
-        image: ${ACR_LOGIN_SERVER}/api-gateway-service:${GITHUB_SHA}
+        image: resolveopsacr05.azurecr.io/api-gateway-service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000

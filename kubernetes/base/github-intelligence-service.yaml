@@ -23,7 +23,7 @@ spec:
         fsGroup: 10001
       containers:
       - name: github-intelligence-service
-        image: ${ACR_LOGIN_SERVER}/github-intelligence-service:${GITHUB_SHA}
+        image: resolveopsacr05.azurecr.io/github-intelligence-service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000

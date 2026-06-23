@@ -19,7 +19,7 @@ on:
       - '.github/workflows/resolveops-ci.yml'
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: read
   id-token: write
 
@@ -140,3 +140,49 @@ jobs:
       context_path: ${{ matrix.service.context_path }}
       image_tag: ${{ github.ref_name }}-${{ needs.detect-changed-services.outputs.short_sha }}
       push_image: true
+
+  update-kustomization:
+    name: Update kustomization.yaml image tags
+    needs: [detect-changed-services, build-trivy-push]
+    if: needs.detect-changed-services.outputs.skip_build == 'false' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+      - name: Update image tags in kustomization.yaml
+        run: |
+          TAG="${{ github.ref_name }}-${{ needs.detect-changed-services.outputs.short_sha }}"
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
+
+          cd kubernetes/base
+          for row in $(jq -c '.[]' ../../changed.json); do
+            IMAGE_KEY=$(echo $row | jq -r '.kustomize_image_key')
+            if [ "$IMAGE_KEY" != "null" ]; then
+              echo "Updating image $IMAGE_KEY to tag $TAG"
+              kustomize edit set image "${IMAGE_KEY}:${TAG}"
+            fi
+          done
+          cd ../..
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add kubernetes/base/kustomization.yaml
+          git commit -m "chore: update resolveops-ai image tags to $TAG [skip ci]" || echo "No changes to commit"
+          git push origin ${{ github.ref_name }}
+
+  sync-argo-dev:
+    name: Sync ArgoCD resolveops-ai
+    needs: [update-kustomization]
+    if: github.event_name == 'push'
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/cd-reusable-template.yml@main
+    secrets: inherit
+    with:
+      argocd_app_name: resolveops-ai
+      argocd_server: ${{ vars.ARGOCD_SERVER }}

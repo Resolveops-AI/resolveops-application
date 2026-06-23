@@ -23,7 +23,7 @@ spec:
         fsGroup: 10001
       containers:
       - name: ai-rca-service
-        image: ${ACR_LOGIN_SERVER}/ai-rca-service:${GITHUB_SHA}
+        image: resolveopsacr05.azurecr.io/ai-rca-service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000

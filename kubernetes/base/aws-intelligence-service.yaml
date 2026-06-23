@@ -23,7 +23,7 @@ spec:
         fsGroup: 10001
       containers:
       - name: aws-intelligence-service
-        image: ${ACR_LOGIN_SERVER}/aws-intelligence-service:${GITHUB_SHA}
+        image: resolveopsacr05.azurecr.io/aws-intelligence-service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000

@@ -21,7 +21,7 @@ spec:
         fsGroup: 10001
       containers:
       - name: frontend
-        image: ${ACR_LOGIN_SERVER}/frontend:${GITHUB_SHA}
+        image: resolveopsacr05.azurecr.io/frontend:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3000

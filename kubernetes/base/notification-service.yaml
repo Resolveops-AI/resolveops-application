@@ -23,7 +23,7 @@ spec:
         fsGroup: 10001
       containers:
       - name: notification-service
-        image: ${ACR_LOGIN_SERVER}/notification-service:${GITHUB_SHA}
+        image: resolveopsacr05.azurecr.io/notification-service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000

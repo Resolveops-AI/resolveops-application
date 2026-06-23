@@ -5,6 +5,7 @@ resolveops-frontend:
   dockerfile_path: "frontend/Dockerfile"
   context_path: "frontend"
   image_name: "frontend"
+  kustomize_image_key: "resolveopsacr05.azurecr.io/frontend"
   app_group: "resolveops"
 
 api-gateway-service:
@@ -14,6 +15,7 @@ api-gateway-service:
   dockerfile_path: "services/api-gateway-service/Dockerfile"
   context_path: "services/api-gateway-service"
   image_name: "api-gateway-service"
+  kustomize_image_key: "resolveopsacr05.azurecr.io/api-gateway-service"
   app_group: "resolveops"
 
 auth-service:
@@ -23,6 +25,7 @@ auth-service:
   dockerfile_path: "services/auth-service/Dockerfile"
   context_path: "services/auth-service"
   image_name: "auth-service"
+  kustomize_image_key: "resolveopsacr05.azurecr.io/auth-service"
   app_group: "resolveops"
 
 github-intelligence-service:
@@ -32,6 +35,7 @@ github-intelligence-service:
   dockerfile_path: "services/github-intelligence-service/Dockerfile"
   context_path: "services/github-intelligence-service"
   image_name: "github-intelligence-service"
+  kustomize_image_key: "resolveopsacr05.azurecr.io/github-intelligence-service"
   app_group: "resolveops"
 
 azure-intelligence-service:
@@ -41,6 +45,7 @@ azure-intelligence-service:
   dockerfile_path: "services/azure-intelligence-service/Dockerfile"
   context_path: "services/azure-intelligence-service"
   image_name: "azure-intelligence-service"
+  kustomize_image_key: "resolveopsacr05.azurecr.io/azure-intelligence-service"
   app_group: "resolveops"
 
 aws-intelligence-service:
@@ -50,6 +55,7 @@ aws-intelligence-service:
   dockerfile_path: "services/aws-intelligence-service/Dockerfile"
   context_path: "services/aws-intelligence-service"
   image_name: "aws-intelligence-service"
+  kustomize_image_key: "resolveopsacr05.azurecr.io/aws-intelligence-service"
   app_group: "resolveops"
 
 ai-rca-service:
@@ -59,6 +65,7 @@ ai-rca-service:
   dockerfile_path: "services/ai-rca-service/Dockerfile"
   context_path: "services/ai-rca-service"
   image_name: "ai-rca-service"
+  kustomize_image_key: "resolveopsacr05.azurecr.io/ai-rca-service"
   app_group: "resolveops"
 
 notification-service:
@@ -68,4 +75,5 @@ notification-service:
   dockerfile_path: "services/notification-service/Dockerfile"
   context_path: "services/notification-service"
   image_name: "notification-service"
+  kustomize_image_key: "resolveopsacr05.azurecr.io/notification-service"
   app_group: "resolveops"

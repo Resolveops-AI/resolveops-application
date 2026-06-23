@@ -23,7 +23,7 @@ spec:
         fsGroup: 10001
       containers:
       - name: auth-service
-        image: ${ACR_LOGIN_SERVER}/auth-service:${GITHUB_SHA}
+        image: resolveopsacr05.azurecr.io/auth-service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000

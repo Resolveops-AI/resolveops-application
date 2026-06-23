@@ -395,4 +395,3 @@ jobs:
     with:
       argocd_app_name: quickhaul-prod
       argocd_server: ${{ vars.ARGOCD_SERVER }}
-

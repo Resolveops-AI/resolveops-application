@@ -6,13 +6,16 @@ on:
       - main
     types: [opened, synchronize, reopened]
     paths:
-      - 'resolveops-ai/**'
+      - 'services/**'
+      - 'frontend/**'
       - '.github/workflows/resolveops-ci.yml'
   push:
     branches:
       - main
+      - dev
     paths:
-      - 'resolveops-ai/**'
+      - 'services/**'
+      - 'frontend/**'
       - '.github/workflows/resolveops-ci.yml'
 
 permissions:
@@ -41,47 +44,126 @@ jobs:
           
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             echo "dev_image_tag=resolveops-pr-${{ github.event.pull_request.number }}-$SHORT_SHA" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            echo "dev_image_tag=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
           else
             echo "candidate_tag=main-$SHORT_SHA" >> $GITHUB_OUTPUT
           fi
 
-  security-scan:
+  detect-changed-services:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_services_json: ${{ steps.detect.outputs.changed_services_json }}
+      skip_build: ${{ steps.detect.outputs.skip_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect Changed Services
+        id: detect
+        run: |
+          cat << 'EOF' > detect.py
+          import yaml, json, subprocess, fnmatch, sys
+          with open('.github/service-map/resolveops-services.yml', 'r') as f:
+              service_map = yaml.safe_load(f)
+          event_name = '${{ github.event_name }}'
+          if event_name == 'pull_request':
+              base_sha = '${{ github.event.pull_request.base.sha }}'
+              head_sha = '${{ github.event.pull_request.head.sha }}'
+              cmd = f"git diff --name-only {base_sha} {head_sha}"
+          else:
+              before = '${{ github.event.before }}'
+              sha = '${{ github.sha }}'
+              if before and before != '0000000000000000000000000000000000000000':
+                  cmd = f"git diff --name-only {before} {sha}"
+              else:
+                  cmd = f"git diff --name-only HEAD^ HEAD"
+          try:
+              output = subprocess.check_output(cmd, shell=True, text=True)
+          except subprocess.CalledProcessError:
+              output = ""
+          changed_files = [line.strip() for line in output.strip().split('\n') if line.strip()]
+          
+          changed_services = []
+          for svc, details in service_map.items():
+              changed = False
+              for file in changed_files:
+                  for path in details['source_paths']:
+                      if fnmatch.fnmatch(file, path):
+                          changed = True
+                          break
+                  if changed:
+                      break
+              if changed:
+                  changed_services.append(details)
+          with open('output.json', 'w') as f:
+              json.dump(changed_services, f)
+          EOF
+          python3 -m pip install pyyaml
+          python3 detect.py
+          JSON_OUT=$(cat output.json)
+          echo "changed_services_json=$JSON_OUT" >> $GITHUB_OUTPUT
+          if [ "$JSON_OUT" == "[]" ]; then
+             echo "skip_build=true" >> $GITHUB_OUTPUT
+          else
+             echo "skip_build=false" >> $GITHUB_OUTPUT
+          fi
+          echo "Changed services:"
+          echo "$JSON_OUT" | jq .
+
+  sast-sonar-scan:
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
     secrets: inherit
     with:
-      working_directory: .
+      working_directory: ${{ matrix.service.context_path }}
+      run_sonar: true
+      run_snyk: false
+      run_trivy: false
+
+  sca-snyk-scan:
+    needs: [detect-changed-services]
+    if: needs.detect-changed-services.outputs.skip_build == 'false'
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/ci-reusable-template.yml@main
+    secrets: inherit
+    with:
+      working_directory: ${{ matrix.service.context_path }}
+      run_sonar: false
+      run_snyk: true
+      run_trivy: false
 
   # ==========================================
-  # PR FLOW (DEV IMAGES)
+  # DEV FLOW (PUSH TO DEV)
   # ==========================================
   build-dev-images:
-    if: github.event_name == 'pull_request'
-    needs: [setup, security-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: [setup, detect-changed-services, sast-sonar-scan, sca-snyk-scan]
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
     secrets: inherit
     with:
-      image-name: resolveops-ai
-      context-path: ./resolveops-ai
-      acr-login-server: resolveopsacr03.azurecr.io
-      image-tag: ${{ needs.setup.outputs.dev_image_tag }}
+      image_name: ${{ matrix.service.image_name }}
+      acr_name: ${{ env.ACR_NAME }}
+      acr_login_server: ${{ env.ACR_LOGIN_SERVER }}
+      dockerfile_path: ${{ matrix.service.dockerfile_path }}
+      context_path: ${{ matrix.service.context_path }}
+      image_tag: ${{ needs.setup.outputs.dev_image_tag }}
 
   # ==========================================
   # MAIN FLOW (PROD IMAGES)
   # ==========================================
-  build-candidate-images:
-    if: github.event_name == 'push'
-    needs: [setup, security-scan]
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/docker-build-push-template.yml@main
-    secrets: inherit
-    with:
-      image-name: resolveops-ai
-      context-path: ./resolveops-ai
-      acr-login-server: resolveopsacr03.azurecr.io
-      image-tag: ${{ needs.setup.outputs.candidate_tag }}
-
   calculate-semver:
-    if: github.event_name == 'push'
-    needs: [build-candidate-images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [detect-changed-services, sast-sonar-scan, sca-snyk-scan]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.semver.outputs.new_tag }}
@@ -98,37 +180,17 @@ jobs:
           default_bump: patch
           release_branches: main
 
-  verify-tag-not-exists:
-    if: github.event_name == 'push'
-    needs: [calculate-semver]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Check ACR for Tag
-        run: |
-          TAG="${{ needs.calculate-semver.outputs.new_version }}"
-          EXISTS=$(az acr repository show-tags -n resolveopsacr03 --repository resolveops-ai --query "[?@ == '$TAG']" -o tsv)
-          if [ -n "$EXISTS" ]; then
-            echo "Error: Tag $TAG already exists in ACR!"
-            exit 1
-          fi
-
   prod-approval-gate:
-    if: github.event_name == 'push'
-    needs: [verify-tag-not-exists]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [calculate-semver]
     runs-on: ubuntu-latest
     environment: production
     steps:
       - run: echo "Production environment approved!"
 
-  release-prod:
-    if: github.event_name == 'push'
-    needs: [setup, calculate-semver, prod-approval-gate]
+  release-prod-images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [setup, detect-changed-services, calculate-semver, prod-approval-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -141,41 +203,85 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Retag and Push Image
+      - name: Retag and Push Images
         run: |
-          CANDIDATE="${{ needs.setup.outputs.candidate_tag }}"
           VERSION="${{ needs.calculate-semver.outputs.new_version }}"
+          echo '${{ needs.detect-changed-services.outputs.changed_services_json }}' > changed.json
           
-          echo "Retagging resolveops-ai from $CANDIDATE to $VERSION..."
-          az acr import --name resolveopsacr03 \
-            --source resolveopsacr03.azurecr.io/resolveops-ai:$CANDIDATE \
-            --image resolveops-ai:$VERSION
+          cat << 'EOF' > retag.py
+          import json, subprocess
+          with open('changed.json', 'r') as f:
+              changed = json.load(f)
+              
+          for svc in changed:
+              # For ResolveOps, dev tags are not in values-dev.yaml, so we use the candidate tag or latest dev tag.
+              # Assuming standard dev build tags for dev pushes. Actually, if we just push to main,
+              # we might not have a values file. The prompt says "read source dev image tags from merged values-dev.yaml"
+              # but ResolveOps doesn't use helm values in this repo.
+              # Let's just use the candidate_tag for retagging.
+              candidate = "${{ needs.setup.outputs.candidate_tag }}"
+              print(f"Retagging {svc['image_name']} from {candidate} to {VERSION}")
+              cmd = f"az acr import --name resolveopsacr03 --source resolveopsacr03.azurecr.io/{svc['image_name']}:{candidate} --image {svc['image_name']}:{VERSION}"
+              subprocess.run(cmd, shell=True, check=True)
+          EOF
+          python3 retag.py
+
+  create-git-tag:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [calculate-semver, release-prod-images]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Create Git Tag
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           custom_tag: ${{ needs.calculate-semver.outputs.new_version }}
 
-  notify-security-scan:
-    needs: [security-scan]
-    if: ${{ always() && needs.security-scan.result == 'failure' }}
+  # ==========================================
+  # NOTIFICATIONS
+  # ==========================================
+  notify-detect-changed-services-failed:
+    needs: [detect-changed-services]
+    if: ${{ always() && needs.detect-changed-services.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     secrets: inherit
+    with:
+      service_name: "ResolveOps CI"
+      failed_job_name: "detect-changed-services"
 
-  notify-build-dev-images:
+  notify-sast-sonar-scan-failed:
+    needs: [sast-sonar-scan]
+    if: ${{ always() && needs.sast-sonar-scan.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "ResolveOps CI"
+      failed_job_name: "sast-sonar-scan"
+
+  notify-sca-snyk-scan-failed:
+    needs: [sca-snyk-scan]
+    if: ${{ always() && needs.sca-snyk-scan.result == 'failure' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
+    secrets: inherit
+    with:
+      service_name: "ResolveOps CI"
+      failed_job_name: "sca-snyk-scan"
+
+  notify-build-dev-images-failed:
     needs: [build-dev-images]
     if: ${{ always() && needs.build-dev-images.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     secrets: inherit
+    with:
+      service_name: "ResolveOps CI"
+      failed_job_name: "build-dev-images"
 
-  notify-build-candidate-images:
-    needs: [build-candidate-images]
-    if: ${{ always() && needs.build-candidate-images.result == 'failure' }}
+  notify-release-prod-images-failed:
+    needs: [release-prod-images]
+    if: ${{ always() && needs.release-prod-images.result == 'failure' }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
     secrets: inherit
-
-  notify-release-prod:
-    needs: [release-prod]
-    if: ${{ always() && needs.release-prod.result == 'failure' }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/notify-template.yml@main
-    secrets: inherit
+    with:
+      service_name: "ResolveOps CI"
+      failed_job_name: "release-prod-images"

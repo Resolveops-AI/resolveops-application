@@ -135,7 +135,7 @@ jobs:
 
   sca-snyk-scan:
     name: sca / Snyk Scan (${{ matrix.service.image_name }})
-    needs: [sast-sonar-scan]
+    needs: [detect-changed-services, sast-sonar-scan]
     if: needs.detect-changed-services.outputs.skip_build == 'false'
     strategy:
       matrix:
@@ -153,8 +153,8 @@ jobs:
   # ==========================================
   build-temp-images:
     name: trivy / Build & Scan Image (${{ matrix.service.image_name }})
-    if: github.event_name == 'pull_request'
-    needs: [setup, lint-testing, sca-snyk-scan]
+    if: github.event_name == \'pull_request\'
+    needs: [setup, detect-changed-services, lint-testing, sca-snyk-scan]
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -187,8 +187,8 @@ jobs:
   # ==========================================
   build-dev-images:
     name: dev-publish / Build & Push Image (${{ matrix.service.image_name }})
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [setup, lint-testing, sca-snyk-scan]
+    if: github.event_name == \'push\' && github.ref == \'refs/heads/dev\'
+    needs: [setup, detect-changed-services, lint-testing, sca-snyk-scan]
     strategy:
       matrix:
         service: ${{ fromJson(needs.detect-changed-services.outputs.changed_services_json) }}
@@ -208,8 +208,8 @@ jobs:
   # MAIN FLOW (PROD IMAGES)
   # ==========================================
   calculate-semver:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint-testing, sca-snyk-scan]
+    if: github.event_name == \'push\' && github.ref == \'refs/heads/main\'
+    needs: [detect-changed-services, lint-testing, sca-snyk-scan]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.semver.outputs.new_tag }}

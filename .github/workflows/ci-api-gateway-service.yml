@@ -50,7 +50,6 @@ jobs:
           fi
 
   sast:
-    if: github.event_name == 'pull_request'
     uses: Resolveops-AI/resolveops-templates/.github/workflows/_sast.yml@main
     with:
       working_directory: services/api-gateway-service
@@ -60,7 +59,6 @@ jobs:
 
   sca:
     needs: [sast, get-tag]
-    if: github.event_name == 'pull_request'
     uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
     with:
       working_directory: services/api-gateway-service
@@ -69,7 +67,6 @@ jobs:
 
   build:
     needs: [sast, sca, get-tag]
-    if: github.event_name == 'pull_request'
     uses: Resolveops-AI/resolveops-templates/.github/workflows/_docker-build.yml@main
     with:
       image_name: api-gateway-service

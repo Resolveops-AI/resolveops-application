@@ -26,7 +26,7 @@ notificationService:
   replicaCount: 1
 otpService:
   image:
-    tag: "dev-db708c1"
+    tag: "dev-ea13f99"
   replicaCount: 1
 paymentService:
   image:

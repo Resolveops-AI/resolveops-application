@@ -58,8 +58,8 @@ def test_login_invalid_user(mock_get_table):
 def test_chat_without_auth():
     response = client.post("/api/chat", json={"message": "hello"})
     # Should be rejected because no JWT is provided
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 def test_get_keys_without_auth():
     response = client.get("/api/keys")
-    assert response.status_code == 403
+    assert response.status_code == 401

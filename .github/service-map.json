@@ -78,7 +78,8 @@
     "image_name": "quickhaul-auth",
     "app_type": "quickhaul",
     "gitops_type": "helm",
-    "helm_values_file": "quickhaul/helm/quickhaul"
+    "helm_values_file": "quickhaul/helm/quickhaul",
+    "image_tag_key": ".authService.image.tag"
   },
   {
     "service_name": "quickhaul-booking",
@@ -87,7 +88,8 @@
     "image_name": "quickhaul-booking",
     "app_type": "quickhaul",
     "gitops_type": "helm",
-    "helm_values_file": "quickhaul/helm/quickhaul"
+    "helm_values_file": "quickhaul/helm/quickhaul",
+    "image_tag_key": ".bookingService.image.tag"
   },
   {
     "service_name": "quickhaul-frontend",
@@ -96,7 +98,8 @@
     "image_name": "quickhaul-frontend",
     "app_type": "quickhaul",
     "gitops_type": "helm",
-    "helm_values_file": "quickhaul/helm/quickhaul"
+    "helm_values_file": "quickhaul/helm/quickhaul",
+    "image_tag_key": ".frontend.image.tag"
   },
   {
     "service_name": "quickhaul-location",
@@ -105,7 +108,8 @@
     "image_name": "quickhaul-location",
     "app_type": "quickhaul",
     "gitops_type": "helm",
-    "helm_values_file": "quickhaul/helm/quickhaul"
+    "helm_values_file": "quickhaul/helm/quickhaul",
+    "image_tag_key": ".locationService.image.tag"
   },
   {
     "service_name": "quickhaul-notification",
@@ -114,7 +118,8 @@
     "image_name": "quickhaul-notification",
     "app_type": "quickhaul",
     "gitops_type": "helm",
-    "helm_values_file": "quickhaul/helm/quickhaul"
+    "helm_values_file": "quickhaul/helm/quickhaul",
+    "image_tag_key": ".notificationService.image.tag"
   },
   {
     "service_name": "quickhaul-otp",
@@ -123,7 +128,8 @@
     "image_name": "quickhaul-otp",
     "app_type": "quickhaul",
     "gitops_type": "helm",
-    "helm_values_file": "quickhaul/helm/quickhaul"
+    "helm_values_file": "quickhaul/helm/quickhaul",
+    "image_tag_key": ".otpService.image.tag"
   },
   {
     "service_name": "quickhaul-payment",
@@ -132,6 +138,7 @@
     "image_name": "quickhaul-payment",
     "app_type": "quickhaul",
     "gitops_type": "helm",
-    "helm_values_file": "quickhaul/helm/quickhaul"
+    "helm_values_file": "quickhaul/helm/quickhaul",
+    "image_tag_key": ".paymentService.image.tag"
   }
 ]

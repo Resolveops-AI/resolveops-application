@@ -28,3 +28,9 @@ Retry pipeline with official sonarcloud actions.
 Retry pipeline with official sonarcloud actions.
 Retry pipeline with official sonarcloud actions.
 Retry pipeline with official sonarcloud actions.
+Retry pipeline with fixed quality gate action.
+Retry pipeline with fixed quality gate action.
+Retry pipeline with fixed quality gate action.
+Retry pipeline with fixed quality gate action.
+Retry pipeline with fixed quality gate action.
+Retry pipeline with fixed quality gate action.

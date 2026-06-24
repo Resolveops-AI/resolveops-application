@@ -18,7 +18,7 @@ authService:
   replicaCount: 1
 bookingService:
   image:
-    tag: "dev-db708c1"
+    tag: "dev-ea13f99"
   replicaCount: 1
 notificationService:
   image:

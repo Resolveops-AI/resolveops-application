@@ -1,0 +1,95 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Get Short SHA
+        id: sha
+        run: echo "short_sha=$(echo ${{ github.event.pull_request.head.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Detect Changed Files
+        id: changed-files
+        uses: tj-actions/changed-files@v41
+
+      - name: Generate Matrix
+        id: set-matrix
+        run: |
+          SERVICES=$(jq -c '.' .github/service-map.json)
+          CHANGED_FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+          
+          MATRIX_JSON="[]"
+          
+          for row in $(echo "${SERVICES}" | jq -r '.[] | @base64'); do
+            _jq() {
+              echo ${row} | base64 --decode | jq -r ${1}
+            }
+            CONTEXT_PATH=$(_jq '.context_path')
+            
+            MATCH=false
+            for file in $CHANGED_FILES; do
+              if [[ "$file" == "$CONTEXT_PATH"* ]]; then
+                MATCH=true
+                break
+              fi
+            done
+            
+            if [ "$MATCH" = true ]; then
+              SERVICE_OBJ=$(echo ${row} | base64 --decode)
+              MATRIX_JSON=$(echo "$MATRIX_JSON" | jq -c ". + [$SERVICE_OBJ]")
+            fi
+          done
+          
+          echo "matrix={\"include\":$MATRIX_JSON}" >> $GITHUB_OUTPUT
+
+  verify-dev-image-exists:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_verify-acr-image.yml@main
+    with:
+      image_name: ${{ matrix.image_name }}
+      image_tag: dev-${{ needs.detect-changes.outputs.short_sha }}
+      acr_name: ${{ vars.ACR_NAME }}
+      acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
+    secrets: inherit
+
+  trivy-scan-existing-dev-image:
+    needs: [detect-changes, verify-dev-image-exists]
+    if: ${{ needs.detect-changes.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_trivy-scan-acr.yml@main
+    with:
+      image_name: ${{ matrix.image_name }}
+      image_tag: dev-${{ needs.detect-changes.outputs.short_sha }}
+      acr_name: ${{ vars.ACR_NAME }}
+      acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
+    secrets: inherit
+
+  notify-on-failure:
+    needs: [detect-changes, verify-dev-image-exists, trivy-scan-existing-dev-image]
+    if: always() && contains(needs.*.result, 'failure')
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-notify.yml@main
+    with:
+      status: failure
+      message: "PR Validation failed. Ensure dev branch builds successfully before opening a PR to main."
+    secrets: inherit

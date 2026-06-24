@@ -1,0 +1,171 @@
+name: Dev Deployment
+
+on:
+  push:
+    branches:
+      - feature/dev
+      - develop
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: 'Service to deploy (or "all")'
+        required: true
+        type: string
+        default: 'all'
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      build_matrix: ${{ steps.set-matrix.outputs.build_matrix }}
+      gitops_matrix: ${{ steps.set-matrix.outputs.gitops_matrix }}
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get Short SHA
+        id: sha
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Detect Changed Files
+        id: changed-files
+        uses: tj-actions/changed-files@v41
+
+      - name: Generate Matrix
+        id: set-matrix
+        run: |
+          SERVICES=$(cat .github/service-map.json)
+          EVENT_NAME="${{ github.event_name }}"
+          TARGET_SERVICE="${{ github.event.inputs.service_name }}"
+          CHANGED_FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+          
+          BUILD_MATRIX="[]"
+          GITOPS_MATRIX="[]"
+          
+          for row in $(echo "${SERVICES}" | jq -r '.[] | @base64'); do
+            _jq() {
+              echo ${row} | base64 --decode | jq -r ${1}
+            }
+            CONTEXT_PATH=$(_jq '.context_path')
+            APP_TYPE=$(_jq '.app_type')
+            SVC_NAME=$(_jq '.service_name')
+            
+            MATCH=false
+            if [ "$EVENT_NAME" == "workflow_dispatch" ]; then
+              if [ "$TARGET_SERVICE" == "all" ] || [ "$TARGET_SERVICE" == "$SVC_NAME" ]; then
+                MATCH=true
+              fi
+            else
+              for file in $CHANGED_FILES; do
+                if [[ "$file" == "$CONTEXT_PATH"* ]]; then
+                  MATCH=true
+                  break
+                fi
+              done
+            fi
+            
+            if [ "$MATCH" = true ]; then
+              SERVICE_OBJ=$(echo ${row} | base64 --decode)
+              BUILD_MATRIX=$(echo "$BUILD_MATRIX" | jq -c ". + [$SERVICE_OBJ]")
+              
+              if [ "$APP_TYPE" == "quickhaul" ]; then
+                GITOPS_MATRIX=$(echo "$GITOPS_MATRIX" | jq -c ". + [$SERVICE_OBJ]")
+              fi
+            fi
+          done
+          
+          echo "build_matrix={\"include\":$BUILD_MATRIX}" >> $GITHUB_OUTPUT
+          echo "gitops_matrix={\"include\":$GITOPS_MATRIX}" >> $GITHUB_OUTPUT
+
+  sast:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sast.yml@main
+    with:
+      working_directory: "."
+    secrets: inherit
+
+#  sca:
+#    needs: detect-changes
+#    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+#    strategy:
+#      fail-fast: false
+#      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+#    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
+#    with:
+#      working_directory: ${{ matrix.context_path }}
+#      service_name: ${{ matrix.service_name }}
+#    secrets: inherit
+
+  dockerfile-check:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_dockerfile-check.yml@main
+    with:
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+    secrets: inherit
+
+  image-build-and-scan:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_image-build-and-scan.yml@main
+    with:
+      context_path: ${{ matrix.context_path }}
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+    secrets: inherit
+
+  publish-dev-image:
+    needs: [detect-changes, sast, dockerfile-check, image-build-and-scan]
+    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build-push.yml@main
+    with:
+      image_name: ${{ matrix.image_name }}
+      context_path: ${{ matrix.context_path }}
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+      image_tag: dev-${{ needs.detect-changes.outputs.short_sha }}
+      acr_name: ${{ vars.ACR_NAME }}
+      acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
+    secrets: inherit
+
+  update-dev-gitops:
+    needs: [detect-changes, publish-dev-image]
+    if: ${{ needs.detect-changes.outputs.gitops_matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.detect-changes.outputs.gitops_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-gitops-update.yml@main
+    with:
+      image_name: ${{ matrix.image_name }}
+      image_tag: dev-${{ needs.detect-changes.outputs.short_sha }}
+      manifest_type: ${{ matrix.gitops_type }}
+      values_file: ${{ matrix.helm_values_file != null && format('{0}/values-dev.yaml', matrix.helm_values_file) || '' }}
+      image_tag_key: ${{ matrix.image_tag_key || '' }}
+      kustomize_dir: ${{ matrix.kustomize_dir || '' }}
+      target_branch: ${{ github.ref_name }}
+    secrets: inherit
+
+  notify-on-failure:
+    needs: [detect-changes, sast, dockerfile-check, image-build-and-scan, publish-dev-image, update-dev-gitops]
+    if: always() && contains(needs.*.result, 'failure')
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-notify.yml@main
+    with:
+      status: failure
+      message: "CI/CD Pipeline failed for one or more services in feature/dev."
+    secrets: inherit

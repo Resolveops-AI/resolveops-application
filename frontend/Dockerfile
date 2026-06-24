@@ -20,3 +20,7 @@ COPY --from=builder --chown=nextjs:nextjs /app/node_modules ./node_modules
 USER nextjs
 EXPOSE 3000
 CMD ["npm", "start"]
+
+# Trigger initial CI/CD build
+
+# Retry initial CI/CD build after template fix

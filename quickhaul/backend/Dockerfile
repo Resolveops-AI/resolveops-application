@@ -1,23 +1,26 @@
-FROM python:3.12-slim
-
-# Set the working directory inside the container
+# Stage 1: Build
+FROM python:3.12-slim AS builder
 WORKDIR /app
-
-# Ensure logs are sent straight to the terminal
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies (needed for some Python packages)
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all backend code
+# Stage 2: Runtime
+FROM python:3.12-slim
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1
+ENV PATH="/opt/venv/bin:$PATH"
+
 RUN groupadd -g 10001 appuser && useradd -u 10001 -g appuser -m -s /bin/bash appuser
+COPY --from=builder /opt/venv /opt/venv
 COPY --chown=appuser:appuser . .
 USER 10001
-

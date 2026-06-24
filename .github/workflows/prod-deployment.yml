@@ -1,0 +1,143 @@
+name: Prod Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: 'Service to deploy (or "all")'
+        required: true
+        type: string
+        default: 'all'
+      release_version:
+        description: 'Semantic Version (e.g. v1.0.0)'
+        required: true
+        type: string
+      source_dev_sha:
+        description: 'The dev commit SHA whose dev image was validated in PR'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  validate-and-prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      short_source_sha: ${{ steps.validate.outputs.short_source_sha }}
+    steps:
+      - name: Validate Release Inputs
+        id: validate
+        run: |
+          if [[ ! "${{ github.event.inputs.release_version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
+            echo "Error: release_version must be semver (e.g. v1.0.0)"
+            exit 1
+          fi
+          
+          # Convert source_dev_sha to short SHA safely
+          SHORT_SHA=$(echo "${{ github.event.inputs.source_dev_sha }}" | cut -c1-7)
+          if [ -z "$SHORT_SHA" ]; then
+            echo "Error: Invalid source_dev_sha"
+            exit 1
+          fi
+          echo "short_source_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Generate Matrix
+        id: set-matrix
+        run: |
+          SERVICES=$(cat .github/service-map.json)
+          TARGET_SERVICE="${{ github.event.inputs.service_name }}"
+          
+          MATRIX_JSON="[]"
+          
+          for row in $(echo "${SERVICES}" | jq -r '.[] | @base64'); do
+            _jq() {
+              echo ${row} | base64 --decode | jq -r ${1}
+            }
+            SVC_NAME=$(_jq '.service_name')
+            
+            if [ "$TARGET_SERVICE" == "all" ] || [ "$TARGET_SERVICE" == "$SVC_NAME" ]; then
+              SERVICE_OBJ=$(echo ${row} | base64 --decode)
+              MATRIX_JSON=$(echo "$MATRIX_JSON" | jq -c ". + [$SERVICE_OBJ]")
+            fi
+          done
+          
+          if [ "$MATRIX_JSON" == "[]" ]; then
+            echo "Error: No matching service found for '$TARGET_SERVICE'"
+            exit 1
+          fi
+          
+          echo "matrix={\"include\":$MATRIX_JSON}" >> $GITHUB_OUTPUT
+
+  verify-source-dev-image:
+    needs: validate-and-prepare
+    if: ${{ needs.validate-and-prepare.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_verify-acr-image.yml@main
+    with:
+      image_name: ${{ matrix.image_name }}
+      image_tag: dev-${{ needs.validate-and-prepare.outputs.short_source_sha }}
+      acr_name: ${{ vars.ACR_NAME }}
+      acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
+    secrets: inherit
+
+  trivy-scan-release-candidate:
+    needs: [validate-and-prepare, verify-source-dev-image]
+    if: ${{ needs.validate-and-prepare.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_trivy-scan-acr.yml@main
+    with:
+      image_name: ${{ matrix.image_name }}
+      image_tag: dev-${{ needs.validate-and-prepare.outputs.short_source_sha }}
+      acr_name: ${{ vars.ACR_NAME }}
+      acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
+    secrets: inherit
+
+  promote-image:
+    needs: [validate-and-prepare, trivy-scan-release-candidate]
+    if: ${{ needs.validate-and-prepare.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_promote-acr-image.yml@main
+    with:
+      image_name: ${{ matrix.image_name }}
+      source_tag: dev-${{ needs.validate-and-prepare.outputs.short_source_sha }}
+      target_tag: ${{ github.event.inputs.release_version }}
+      acr_name: ${{ vars.ACR_NAME }}
+    secrets: inherit
+
+  update-prod-gitops:
+    needs: [validate-and-prepare, promote-image]
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-gitops-update.yml@main
+    with:
+      image_name: ${{ matrix.image_name }}
+      image_tag: ${{ github.event.inputs.release_version }}
+      manifest_type: ${{ matrix.gitops_type }}
+      values_file: ${{ matrix.helm_values_file != null && format('{0}/values-prod.yaml', matrix.helm_values_file) || '' }}
+      image_tag_key: ${{ matrix.image_tag_key || '' }}
+      kustomize_dir: ${{ matrix.kustomize_dir || '' }}
+      target_branch: main
+    secrets: inherit
+
+  notify-on-failure:
+    needs: [validate-and-prepare, verify-source-dev-image, trivy-scan-release-candidate, promote-image, update-prod-gitops]
+    if: always() && contains(needs.*.result, 'failure')
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-notify.yml@main
+    with:
+      status: failure
+      message: "Prod Deployment failed during artifact promotion or GitOps update."
+    secrets: inherit

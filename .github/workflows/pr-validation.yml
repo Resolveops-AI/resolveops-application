@@ -52,7 +52,7 @@ jobs:
 
   pr-validation:
     needs: detect-changes
-    if: ${{ fromJson(needs.detect-changes.outputs.matrix).include[0] != null }}
+    if: ${{ needs.detect-changes.outputs.matrix != '{"include":[]}' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
@@ -65,7 +65,7 @@ jobs:
 
   dockerfile-check:
     needs: detect-changes
-    if: ${{ fromJson(needs.detect-changes.outputs.matrix).include[0] != null }}
+    if: ${{ needs.detect-changes.outputs.matrix != '{"include":[]}' }}
     runs-on: ubuntu-latest
     strategy:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}

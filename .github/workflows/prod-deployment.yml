@@ -69,6 +69,7 @@ jobs:
 
   prod-build-push:
     needs: validate-and-prepare
+    if: ${{ needs.validate-and-prepare.outputs.matrix != '{"include":[]}' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}

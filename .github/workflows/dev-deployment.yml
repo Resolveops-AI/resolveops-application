@@ -86,7 +86,7 @@ jobs:
 
   dev-build-push:
     needs: detect-changes
-    if: ${{ fromJson(needs.detect-changes.outputs.build_matrix).include[0] != null }}
+    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
@@ -101,7 +101,7 @@ jobs:
 
   gitops-update:
     needs: [detect-changes, dev-build-push]
-    if: ${{ fromJson(needs.detect-changes.outputs.gitops_matrix).include[0] != null }}
+    if: ${{ needs.detect-changes.outputs.gitops_matrix != '{"include":[]}' }}
     strategy:
       fail-fast: false
       max-parallel: 1

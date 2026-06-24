@@ -100,3 +100,9 @@ Final retry to grab flawless HTML artifacts.
 Final retry to grab flawless HTML artifacts.
 Final retry to grab flawless HTML artifacts.
 Final retry to grab flawless HTML artifacts.
+Retry pipeline to build ACR image.
+Retry pipeline to build ACR image.
+Retry pipeline to build ACR image.
+Retry pipeline to build ACR image.
+Retry pipeline to build ACR image.
+Retry pipeline to build ACR image.

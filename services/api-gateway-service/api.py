@@ -48,6 +48,10 @@ app = FastAPI(
     version="3.0.0"
 )
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 engine = LogRageEngine()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()

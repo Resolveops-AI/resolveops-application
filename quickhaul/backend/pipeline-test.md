@@ -46,3 +46,9 @@ Retry pipeline with correct SonarCloud user permissions.
 Retry pipeline with correct SonarCloud user permissions.
 Retry pipeline with correct SonarCloud user permissions.
 Retry pipeline with correct SonarCloud user permissions.
+Retry pipeline with reverted scanner action.
+Retry pipeline with reverted scanner action.
+Retry pipeline with reverted scanner action.
+Retry pipeline with reverted scanner action.
+Retry pipeline with reverted scanner action.
+Retry pipeline with reverted scanner action.

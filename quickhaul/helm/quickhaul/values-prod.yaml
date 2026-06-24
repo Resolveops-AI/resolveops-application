@@ -24,7 +24,7 @@ notificationService:
   replicaCount: 2
 otpService:
   image:
-    tag: v0.0.0
+    tag: v2.0.0
   replicaCount: 2
 paymentService:
   image:

@@ -37,4 +37,4 @@ images:
 - name: resolveopsacr05.azurecr.io/notification-service
   newTag: v1.0.0
 - name: resolveopsacr05.azurecr.io/resolveops-frontend
-  newTag: "4"
+  newTag: "v1.0.0"

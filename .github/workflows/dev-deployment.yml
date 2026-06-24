@@ -84,8 +84,53 @@ jobs:
           echo "build_matrix={\"include\":$BUILD_MATRIX}" >> $GITHUB_OUTPUT
           echo "gitops_matrix={\"include\":$GITOPS_MATRIX}" >> $GITHUB_OUTPUT
 
-  dev-build-push:
+  sast:
     needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sast.yml@main
+    with:
+      working_directory: ${{ matrix.context_path }}
+    secrets: inherit
+
+  sca:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
+    with:
+      working_directory: ${{ matrix.context_path }}
+    secrets: inherit
+
+  dockerfile-check:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_dockerfile-check.yml@main
+    with:
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+    secrets: inherit
+
+  image-build-and-scan:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_image-build-and-scan.yml@main
+    with:
+      context_path: ${{ matrix.context_path }}
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+    secrets: inherit
+
+  publish:
+    needs: [detect-changes, sast, sca, dockerfile-check, image-build-and-scan]
     if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
     strategy:
       fail-fast: false
@@ -100,8 +145,8 @@ jobs:
       acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
     secrets: inherit
 
-  gitops-update:
-    needs: [detect-changes, dev-build-push]
+  deploy:
+    needs: [detect-changes, publish]
     if: ${{ needs.detect-changes.outputs.gitops_matrix != '{"include":[]}' }}
     strategy:
       fail-fast: false
@@ -116,4 +161,13 @@ jobs:
       image_tag_key: ${{ matrix.image_tag_key || '' }}
       kustomize_dir: ${{ matrix.kustomize_dir || '' }}
       target_branch: ${{ github.ref_name }}
+    secrets: inherit
+
+  notify-on-failure:
+    needs: [detect-changes, sast, sca, dockerfile-check, image-build-and-scan, publish, deploy]
+    if: always() && contains(needs.*.result, 'failure')
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-notify.yml@main
+    with:
+      status: failure
+      message: "CI/CD Pipeline failed for one or more services in feature/dev."
     secrets: inherit

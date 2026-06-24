@@ -50,30 +50,47 @@ jobs:
           
           echo "matrix={\"include\":$MATRIX_JSON}" >> $GITHUB_OUTPUT
 
-  pr-validation:
+  sast:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.matrix != '{"include":[]}' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-pr-validation.yml@main
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sast.yml@main
     with:
-      context_path: ${{ matrix.context_path }}
-      dockerfile_path: ${{ matrix.dockerfile_path }}
+      working_directory: ${{ matrix.context_path }}
+    secrets: inherit
+
+  sca:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
+    with:
+      working_directory: ${{ matrix.context_path }}
     secrets: inherit
 
   dockerfile-check:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.matrix != '{"include":[]}' }}
-    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify Non-Root User
-        run: |
-          if ! grep -Eq '^[[:space:]]*USER[[:space:]]+' "${{ matrix.dockerfile_path }}"; then
-            echo "Error: Dockerfile must define a non-root USER"
-            exit 1
-          fi
-          echo "Dockerfile passed security check."
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_dockerfile-check.yml@main
+    with:
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+    secrets: inherit
+
+  image-build-and-scan:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_image-build-and-scan.yml@main
+    with:
+      context_path: ${{ matrix.context_path }}
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+    secrets: inherit

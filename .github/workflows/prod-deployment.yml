@@ -67,8 +67,53 @@ jobs:
           
           echo "matrix={\"include\":$MATRIX_JSON}" >> $GITHUB_OUTPUT
 
-  prod-build-push:
+  sast:
     needs: validate-and-prepare
+    if: ${{ needs.validate-and-prepare.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sast.yml@main
+    with:
+      working_directory: ${{ matrix.context_path }}
+    secrets: inherit
+
+  sca:
+    needs: validate-and-prepare
+    if: ${{ needs.validate-and-prepare.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
+    with:
+      working_directory: ${{ matrix.context_path }}
+    secrets: inherit
+
+  dockerfile-check:
+    needs: validate-and-prepare
+    if: ${{ needs.validate-and-prepare.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_dockerfile-check.yml@main
+    with:
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+    secrets: inherit
+
+  image-build-and-scan:
+    needs: validate-and-prepare
+    if: ${{ needs.validate-and-prepare.outputs.matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_image-build-and-scan.yml@main
+    with:
+      context_path: ${{ matrix.context_path }}
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+    secrets: inherit
+
+  publish:
+    needs: [validate-and-prepare, sast, sca, dockerfile-check, image-build-and-scan]
     if: ${{ needs.validate-and-prepare.outputs.matrix != '{"include":[]}' }}
     strategy:
       fail-fast: false
@@ -83,8 +128,8 @@ jobs:
       acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
     secrets: inherit
 
-  gitops-update:
-    needs: [validate-and-prepare, prod-build-push]
+  deploy:
+    needs: [validate-and-prepare, publish]
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -98,4 +143,13 @@ jobs:
       image_tag_key: ${{ matrix.image_tag_key || '' }}
       kustomize_dir: ${{ matrix.kustomize_dir || '' }}
       target_branch: main
+    secrets: inherit
+
+  notify-on-failure:
+    needs: [validate-and-prepare, sast, sca, dockerfile-check, image-build-and-scan, publish, deploy]
+    if: always() && contains(needs.*.result, 'failure')
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-notify.yml@main
+    with:
+      status: failure
+      message: "CI/CD Pipeline failed for one or more services in prod."
     secrets: inherit

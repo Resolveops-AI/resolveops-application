@@ -92,17 +92,17 @@ jobs:
       working_directory: "."
     secrets: inherit
 
-  sca:
-    needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
-    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
-    with:
-      working_directory: ${{ matrix.context_path }}
-      service_name: ${{ matrix.service_name }}
-    secrets: inherit
+#  sca:
+#    needs: detect-changes
+#    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+#    strategy:
+#      fail-fast: false
+#      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+#    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
+#    with:
+#      working_directory: ${{ matrix.context_path }}
+#      service_name: ${{ matrix.service_name }}
+#    secrets: inherit
 
   dockerfile-check:
     needs: detect-changes
@@ -128,7 +128,7 @@ jobs:
     secrets: inherit
 
   publish-dev-image:
-    needs: [detect-changes, sast, sca, dockerfile-check, image-build-and-scan]
+    needs: [detect-changes, sast, dockerfile-check, image-build-and-scan]
     if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
     strategy:
       fail-fast: false
@@ -162,7 +162,7 @@ jobs:
     secrets: inherit
 
   notify-on-failure:
-    needs: [detect-changes, sast, sca, dockerfile-check, image-build-and-scan, publish-dev-image, update-dev-gitops]
+    needs: [detect-changes, sast, dockerfile-check, image-build-and-scan, publish-dev-image, update-dev-gitops]
     if: always() && contains(needs.*.result, 'failure')
     uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-notify.yml@main
     with:

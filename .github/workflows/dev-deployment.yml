@@ -1,0 +1,103 @@
+name: Dev Deployment
+
+on:
+  push:
+    branches:
+      - feature/dev
+      - develop
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      build_matrix: ${{ steps.set-matrix.outputs.build_matrix }}
+      gitops_matrix: ${{ steps.set-matrix.outputs.gitops_matrix }}
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get Short SHA
+        id: sha
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Detect Changed Files
+        id: changed-files
+        uses: tj-actions/changed-files@v41
+
+      - name: Generate Matrix
+        id: set-matrix
+        run: |
+          SERVICES=$(cat .github/service-map.json)
+          CHANGED_FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+          
+          BUILD_MATRIX="[]"
+          GITOPS_MATRIX="[]"
+          
+          for row in $(echo "${SERVICES}" | jq -r '.[] | @base64'); do
+            _jq() {
+              echo ${row} | base64 --decode | jq -r ${1}
+            }
+            CONTEXT_PATH=$(_jq '.context_path')
+            APP_TYPE=$(_jq '.app_type')
+            
+            MATCH=false
+            for file in $CHANGED_FILES; do
+              if [[ "$file" == "$CONTEXT_PATH"* ]]; then
+                MATCH=true
+                break
+              fi
+            done
+            
+            if [ "$MATCH" = true ]; then
+              SERVICE_OBJ=$(echo ${row} | base64 --decode)
+              BUILD_MATRIX=$(echo "$BUILD_MATRIX" | jq ". + [$SERVICE_OBJ]")
+              
+              if [ "$APP_TYPE" == "quickhaul" ]; then
+                GITOPS_MATRIX=$(echo "$GITOPS_MATRIX" | jq ". + [$SERVICE_OBJ]")
+              fi
+            fi
+          done
+          
+          echo "build_matrix={\"include\":$BUILD_MATRIX}" >> $GITHUB_OUTPUT
+          echo "gitops_matrix={\"include\":$GITOPS_MATRIX}" >> $GITHUB_OUTPUT
+
+  dev-build-push:
+    needs: detect-changes
+    if: ${{ fromJson(needs.detect-changes.outputs.build_matrix).include[0] != null }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build-push.yml@main
+    with:
+      image_name: ${{ matrix.image_name }}
+      context_path: ${{ matrix.context_path }}
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+      image_tag: dev-${{ needs.detect-changes.outputs.short_sha }}
+      environment: dev
+    secrets: inherit
+
+  gitops-update:
+    needs: [detect-changes, dev-build-push]
+    if: ${{ fromJson(needs.detect-changes.outputs.gitops_matrix).include[0] != null }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.detect-changes.outputs.gitops_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-gitops-update.yml@main
+    with:
+      service_name: ${{ matrix.service_name }}
+      image_name: ${{ matrix.image_name }}
+      image_tag: dev-${{ needs.detect-changes.outputs.short_sha }}
+      app_type: ${{ matrix.app_type }}
+      gitops_type: ${{ matrix.gitops_type }}
+      helm_values_file: ${{ matrix.helm_values_file != null && format('{0}/values-dev.yaml', matrix.helm_values_file) || '' }}
+      kustomize_dir: ${{ matrix.kustomize_dir || '' }}
+      target_branch: ${{ github.ref_name }}
+    secrets: inherit

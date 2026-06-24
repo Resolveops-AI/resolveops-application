@@ -1,25 +1,7 @@
 name: CI/CD - api-gateway-service
 
 on:
-  push:
-    branches:
-      - feature/dev
-    paths:
-      - '.github/workflows/ci-api-gateway-service.yml'
-      - 'services/api-gateway-service/**'
-  pull_request:
-    branches:
-      - feature/dev
-      - main
-    paths:
-      - '.github/workflows/ci-api-gateway-service.yml'
-      - 'services/api-gateway-service/**'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Semantic Version (e.g. v1.0.0)'
-        required: true
-        type: string
 permissions:
   contents: write
   id-token: write

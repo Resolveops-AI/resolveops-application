@@ -1,0 +1,100 @@
+name: Prod Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: 'Service to deploy (or "all")'
+        required: true
+        type: string
+        default: 'all'
+      image_tag:
+        description: 'Semantic Version (e.g. v1.0.0)'
+        required: true
+        type: string
+      source_ref:
+        description: 'Source ref to deploy (main, commit SHA, or tag)'
+        required: true
+        type: string
+        default: 'main'
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  validate-and-prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Validate Tag
+        run: |
+          if [[ ! "${{ github.event.inputs.image_tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
+            echo "Error: image_tag must be semver (e.g. v1.0.0)"
+            exit 1
+          fi
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.source_ref }}
+
+      - name: Generate Matrix
+        id: set-matrix
+        run: |
+          SERVICES=$(cat .github/service-map.json)
+          TARGET_SERVICE="${{ github.event.inputs.service_name }}"
+          
+          MATRIX_JSON="[]"
+          
+          for row in $(echo "${SERVICES}" | jq -r '.[] | @base64'); do
+            _jq() {
+              echo ${row} | base64 --decode | jq -r ${1}
+            }
+            SVC_NAME=$(_jq '.service_name')
+            
+            if [ "$TARGET_SERVICE" == "all" ] || [ "$TARGET_SERVICE" == "$SVC_NAME" ]; then
+              SERVICE_OBJ=$(echo ${row} | base64 --decode)
+              MATRIX_JSON=$(echo "$MATRIX_JSON" | jq ". + [$SERVICE_OBJ]")
+            fi
+          done
+          
+          if [ "$MATRIX_JSON" == "[]" ]; then
+            echo "Error: No matching service found for '$TARGET_SERVICE'"
+            exit 1
+          fi
+          
+          echo "matrix={\"include\":$MATRIX_JSON}" >> $GITHUB_OUTPUT
+
+  prod-build-push:
+    needs: validate-and-prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-docker-build-push.yml@main
+    with:
+      image_name: ${{ matrix.image_name }}
+      context_path: ${{ matrix.context_path }}
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+      image_tag: ${{ github.event.inputs.image_tag }}
+      environment: prod
+    secrets: inherit
+
+  gitops-update:
+    needs: [validate-and-prepare, prod-build-push]
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.validate-and-prepare.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-gitops-update.yml@main
+    with:
+      service_name: ${{ matrix.service_name }}
+      image_name: ${{ matrix.image_name }}
+      image_tag: ${{ github.event.inputs.image_tag }}
+      app_type: ${{ matrix.app_type }}
+      gitops_type: ${{ matrix.gitops_type }}
+      helm_values_file: ${{ matrix.helm_values_file != null && format('{0}/values-prod.yaml', matrix.helm_values_file) || '' }}
+      kustomize_dir: ${{ matrix.kustomize_dir || '' }}
+      target_branch: main
+    secrets: inherit

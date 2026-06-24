@@ -1,0 +1,80 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches:
+      - feature/dev
+      - develop
+      - main
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Detect Changed Files
+        id: changed-files
+        uses: tj-actions/changed-files@v41
+
+      - name: Generate Matrix
+        id: set-matrix
+        run: |
+          SERVICES=$(cat .github/service-map.json)
+          CHANGED_FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+          
+          MATRIX_JSON="[]"
+          
+          for row in $(echo "${SERVICES}" | jq -r '.[] | @base64'); do
+            _jq() {
+              echo ${row} | base64 --decode | jq -r ${1}
+            }
+            CONTEXT_PATH=$(_jq '.context_path')
+            
+            MATCH=false
+            for file in $CHANGED_FILES; do
+              if [[ "$file" == "$CONTEXT_PATH"* ]]; then
+                MATCH=true
+                break
+              fi
+            done
+            
+            if [ "$MATCH" = true ]; then
+              SERVICE_OBJ=$(echo ${row} | base64 --decode)
+              MATRIX_JSON=$(echo "$MATRIX_JSON" | jq ". + [$SERVICE_OBJ]")
+            fi
+          done
+          
+          echo "matrix={\"include\":$MATRIX_JSON}" >> $GITHUB_OUTPUT
+
+  pr-validation:
+    needs: detect-changes
+    if: ${{ fromJson(needs.detect-changes.outputs.matrix).include[0] != null }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-pr-validation.yml@main
+    with:
+      service_name: ${{ matrix.service_name }}
+      context_path: ${{ matrix.context_path }}
+      dockerfile_path: ${{ matrix.dockerfile_path }}
+    secrets: inherit
+
+  dockerfile-check:
+    needs: detect-changes
+    if: ${{ fromJson(needs.detect-changes.outputs.matrix).include[0] != null }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Non-Root User
+        run: |
+          if ! grep -Eq '^[[:space:]]*USER[[:space:]]+' "${{ matrix.dockerfile_path }}"; then
+            echo "Error: Dockerfile must define a non-root USER"
+            exit 1
+          fi
+          echo "Dockerfile passed security check."

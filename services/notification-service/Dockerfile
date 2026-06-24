@@ -6,3 +6,5 @@ RUN groupadd -g 10001 appuser && useradd -u 10001 -g appuser -m -s /bin/bash app
 COPY --chown=appuser:appuser . .
 USER 10001
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# Trigger initial CI/CD build

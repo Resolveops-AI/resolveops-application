@@ -56,14 +56,14 @@ engine = LogRageEngine()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
-JWT_SECRET = "super_secret_jwt_key_for_nexus_saas"
+import os
+JWT_SECRET = os.environ.get("JWT_SECRET", "fallback_dev_secret_only")
 
 def get_password_hash(password: str) -> str:
-    # Use pure SHA-256 to absolutely guarantee no passlib 72-byte length crashes
-    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+    return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return hashlib.sha256(plain_password.encode('utf-8')).hexdigest() == hashed_password
+    return pwd_context.verify(plain_password, hashed_password)
 
 # --- Models ---
 class UserAuth(BaseModel):

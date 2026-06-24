@@ -11,3 +11,4 @@ Retry pipeline with official Project Token.
 Retry pipeline with Personal Token.
 Retry pipeline with corrected Quality Gate config.
 Retry pipeline using native SonarCloud GitHub integration.
+Retry pipeline with built-in Quality Gate wait.

@@ -76,3 +76,9 @@ Retry pipeline using native SonarCloud GitHub integration.
 Retry pipeline using native SonarCloud GitHub integration.
 Retry pipeline using native SonarCloud GitHub integration.
 Retry pipeline using native SonarCloud GitHub integration.
+Retry pipeline with built-in Quality Gate wait.
+Retry pipeline with built-in Quality Gate wait.
+Retry pipeline with built-in Quality Gate wait.
+Retry pipeline with built-in Quality Gate wait.
+Retry pipeline with built-in Quality Gate wait.
+Retry pipeline with built-in Quality Gate wait.

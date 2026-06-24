@@ -1,7 +1,7 @@
 namespaceOverride: quickhaul-prod
 replicaCount: 2
 global:
-  imageRegistry: ""  # injected via ArgoCD helm.parameters — do not hardcode here
+  imageRegistry: "" # injected via ArgoCD helm.parameters — do not hardcode here
 frontend:
   image:
     tag: v0.0.0
@@ -12,7 +12,7 @@ locationService:
   replicaCount: 2
 authService:
   image:
-    tag: v0.0.0
+    tag: v2.0.0
   replicaCount: 2
 bookingService:
   image:

@@ -40,3 +40,9 @@ Retry pipeline with Quality Gate removed.
 Retry pipeline with Quality Gate removed.
 Retry pipeline with Quality Gate removed.
 Retry pipeline with Quality Gate removed.
+Retry pipeline with correct SonarCloud user permissions.
+Retry pipeline with correct SonarCloud user permissions.
+Retry pipeline with correct SonarCloud user permissions.
+Retry pipeline with correct SonarCloud user permissions.
+Retry pipeline with correct SonarCloud user permissions.
+Retry pipeline with correct SonarCloud user permissions.

@@ -70,3 +70,9 @@ Retry pipeline with corrected Quality Gate config.
 Retry pipeline with corrected Quality Gate config.
 Retry pipeline with corrected Quality Gate config.
 Retry pipeline with corrected Quality Gate config.
+Retry pipeline using native SonarCloud GitHub integration.
+Retry pipeline using native SonarCloud GitHub integration.
+Retry pipeline using native SonarCloud GitHub integration.
+Retry pipeline using native SonarCloud GitHub integration.
+Retry pipeline using native SonarCloud GitHub integration.
+Retry pipeline using native SonarCloud GitHub integration.

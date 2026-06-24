@@ -73,10 +73,10 @@ jobs:
             
             if [ "$MATCH" = true ]; then
               SERVICE_OBJ=$(echo ${row} | base64 --decode)
-              BUILD_MATRIX=$(echo "$BUILD_MATRIX" | jq ". + [$SERVICE_OBJ]")
+              BUILD_MATRIX=$(echo "$BUILD_MATRIX" | jq -c ". + [$SERVICE_OBJ]")
               
               if [ "$APP_TYPE" == "quickhaul" ]; then
-                GITOPS_MATRIX=$(echo "$GITOPS_MATRIX" | jq ". + [$SERVICE_OBJ]")
+                GITOPS_MATRIX=$(echo "$GITOPS_MATRIX" | jq -c ". + [$SERVICE_OBJ]")
               fi
             fi
           done

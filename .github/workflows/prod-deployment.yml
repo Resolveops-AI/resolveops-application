@@ -56,7 +56,7 @@ jobs:
             
             if [ "$TARGET_SERVICE" == "all" ] || [ "$TARGET_SERVICE" == "$SVC_NAME" ]; then
               SERVICE_OBJ=$(echo ${row} | base64 --decode)
-              MATRIX_JSON=$(echo "$MATRIX_JSON" | jq ". + [$SERVICE_OBJ]")
+              MATRIX_JSON=$(echo "$MATRIX_JSON" | jq -c ". + [$SERVICE_OBJ]")
             fi
           done
           

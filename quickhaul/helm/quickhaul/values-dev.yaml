@@ -30,7 +30,7 @@ otpService:
   replicaCount: 1
 paymentService:
   image:
-    tag: "dev-db708c1"
+    tag: "dev-ea13f99"
   replicaCount: 1
 config:
   mongoUri: mongodb://quickhaul-mongodb:27017

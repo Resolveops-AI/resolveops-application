@@ -2,7 +2,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: frontend-pdb
-  namespace: resolveops
+  
 spec:
   minAvailable: 1
   selector:
@@ -13,7 +13,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: api-gateway-pdb
-  namespace: resolveops
+  
 spec:
   minAvailable: 1
   selector:

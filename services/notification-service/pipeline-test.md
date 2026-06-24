@@ -7,3 +7,4 @@ Retry pipeline with fixed quality gate action.
 Retry pipeline with Quality Gate removed.
 Retry pipeline with correct SonarCloud user permissions.
 Retry pipeline with reverted scanner action.
+Retry pipeline with official Project Token.

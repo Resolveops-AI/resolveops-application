@@ -5,6 +5,13 @@ on:
     branches:
       - feature/dev
       - develop
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: 'Service to deploy (or "all")'
+        required: true
+        type: string
+        default: 'all'
 
 permissions:
   id-token: write
@@ -35,6 +42,8 @@ jobs:
         id: set-matrix
         run: |
           SERVICES=$(cat .github/service-map.json)
+          EVENT_NAME="${{ github.event_name }}"
+          TARGET_SERVICE="${{ github.event.inputs.service_name }}"
           CHANGED_FILES="${{ steps.changed-files.outputs.all_changed_files }}"
           
           BUILD_MATRIX="[]"
@@ -46,14 +55,21 @@ jobs:
             }
             CONTEXT_PATH=$(_jq '.context_path')
             APP_TYPE=$(_jq '.app_type')
+            SVC_NAME=$(_jq '.service_name')
             
             MATCH=false
-            for file in $CHANGED_FILES; do
-              if [[ "$file" == "$CONTEXT_PATH"* ]]; then
+            if [ "$EVENT_NAME" == "workflow_dispatch" ]; then
+              if [ "$TARGET_SERVICE" == "all" ] || [ "$TARGET_SERVICE" == "$SVC_NAME" ]; then
                 MATCH=true
-                break
               fi
-            done
+            else
+              for file in $CHANGED_FILES; do
+                if [[ "$file" == "$CONTEXT_PATH"* ]]; then
+                  MATCH=true
+                  break
+                fi
+              done
+            fi
             
             if [ "$MATCH" = true ]; then
               SERVICE_OBJ=$(echo ${row} | base64 --decode)

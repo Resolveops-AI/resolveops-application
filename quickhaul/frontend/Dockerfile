@@ -22,3 +22,5 @@ EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]
 
 # Trigger initial CI/CD build
+
+# Retry initial CI/CD build after template fix

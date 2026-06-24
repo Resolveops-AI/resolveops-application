@@ -29,3 +29,5 @@ USER 10001
 CMD ["uvicorn", "services.otp_service.app:app", "--host", "0.0.0.0", "--port", "8005"]
 
 # Trigger initial CI/CD build
+
+# Retry initial CI/CD build after template fix

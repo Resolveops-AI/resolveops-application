@@ -88,3 +88,9 @@ Retry pipeline with completely native Quality Gate integration.
 Retry pipeline with completely native Quality Gate integration.
 Retry pipeline with completely native Quality Gate integration.
 Retry pipeline with completely native Quality Gate integration.
+Retry pipeline to generate HTML artifacts.
+Retry pipeline to generate HTML artifacts.
+Retry pipeline to generate HTML artifacts.
+Retry pipeline to generate HTML artifacts.
+Retry pipeline to generate HTML artifacts.
+Retry pipeline to generate HTML artifacts.

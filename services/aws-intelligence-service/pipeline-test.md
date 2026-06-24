@@ -13,3 +13,4 @@ Retry pipeline with corrected Quality Gate config.
 Retry pipeline using native SonarCloud GitHub integration.
 Retry pipeline with built-in Quality Gate wait.
 Retry pipeline with completely native Quality Gate integration.
+Retry pipeline to generate HTML artifacts.

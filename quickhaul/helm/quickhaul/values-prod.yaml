@@ -12,7 +12,7 @@ locationService:
   replicaCount: 2
 authService:
   image:
-    tag: v2.0.0
+    tag: v1.0.1
   replicaCount: 2
 bookingService:
   image:

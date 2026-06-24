@@ -58,7 +58,6 @@ jobs:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-pr-validation.yml@main
     with:
-      service_name: ${{ matrix.service_name }}
       context_path: ${{ matrix.context_path }}
       dockerfile_path: ${{ matrix.dockerfile_path }}
     secrets: inherit

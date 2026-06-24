@@ -4,3 +4,9 @@ Retry initial CI/CD build after template fix.
 Retry initial CI/CD build after template fix.
 Retry initial CI/CD build after template fix.
 Retry initial CI/CD build after template fix.
+Retry initial CI/CD build after projectBaseDir fix.
+Retry initial CI/CD build after projectBaseDir fix.
+Retry initial CI/CD build after projectBaseDir fix.
+Retry initial CI/CD build after projectBaseDir fix.
+Retry initial CI/CD build after projectBaseDir fix.
+Retry initial CI/CD build after projectBaseDir fix.

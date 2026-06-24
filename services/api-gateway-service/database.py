@@ -1,192 +1,122 @@
-import boto3
-import os
-import time
 import datetime
+import os
 import json
-from typing import Optional
+from pg_database import (
+    SessionLocal, User, ApiKey, Incident, Log, Deployment, ChatHistory, PredictiveRisk
+)
 
-# Use the credentials and region configured in the environment
-REGION = os.getenv("AWS_REGION", "us-east-1")
-dynamodb = boto3.resource('dynamodb', region_name=REGION)
+class MockDynamoTable:
+    def __init__(self, model):
+        self.model = model
+
+    def put_item(self, Item):
+        db = SessionLocal()
+        try:
+            # Simple merge: will insert or update based on PK
+            instance = self.model(**Item)
+            db.merge(instance)
+            db.commit()
+        finally:
+            db.close()
+
+    def get_item(self, Key):
+        db = SessionLocal()
+        try:
+            instance = db.query(self.model).filter_by(**Key).first()
+            if instance:
+                d = instance.__dict__.copy()
+                d.pop('_sa_instance_state', None)
+                return {'Item': d}
+            return {}
+        finally:
+            db.close()
+
+    def query(self, KeyConditionExpression=None, ScanIndexForward=True, Limit=None):
+        db = SessionLocal()
+        try:
+            q = db.query(self.model)
+            
+            if KeyConditionExpression is not None:
+                # A boto3 Equals object has ._values (the list of values) and ._name (the key).
+                if hasattr(KeyConditionExpression, '_values') and hasattr(KeyConditionExpression, '_name'):
+                    k = KeyConditionExpression._name
+                    v = KeyConditionExpression._values[0]
+                    q = q.filter(getattr(self.model, k) == v)
+
+            if hasattr(self.model, 'timestamp'):
+                if ScanIndexForward:
+                    q = q.order_by(self.model.timestamp.asc())
+                else:
+                    q = q.order_by(self.model.timestamp.desc())
+                    
+            if Limit:
+                q = q.limit(Limit)
+                
+            results = []
+            for instance in q.all():
+                d = instance.__dict__.copy()
+                d.pop('_sa_instance_state', None)
+                results.append(d)
+            return {'Items': results}
+        except Exception as e:
+            print("Query Error:", e)
+            return {'Items': []}
+        finally:
+            db.close()
+
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues, ExpressionAttributeNames=None):
+        updates = {}
+        if UpdateExpression.startswith("SET "):
+            set_expr = UpdateExpression[4:]
+            assignments = set_expr.split(",")
+            for assign in assignments:
+                if "=" in assign:
+                    k, v = assign.split("=", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    if ExpressionAttributeNames and k in ExpressionAttributeNames:
+                        k = ExpressionAttributeNames[k]
+                    if v in ExpressionAttributeValues:
+                        v = ExpressionAttributeValues[v]
+                    updates[k] = v
+                
+        db = SessionLocal()
+        try:
+            instance = db.query(self.model).filter_by(**Key).first()
+            if instance:
+                for k, v in updates.items():
+                    setattr(instance, k, v)
+                db.commit()
+        finally:
+            db.close()
 
 def init_dynamodb():
-    """Auto-creates DynamoDB tables if they do not exist."""
-    existing_tables = [table.name for table in dynamodb.tables.all()]
-    
-    if "NexusUsers" not in existing_tables:
-        print("Creating NexusUsers DynamoDB table...")
-        table = dynamodb.create_table(
-            TableName='NexusUsers',
-            KeySchema=[
-                {'AttributeName': 'email', 'KeyType': 'HASH'}  # Partition key
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'email', 'AttributeType': 'S'}
-            ],
-            ProvisionedThroughput={
-                'ReadCapacityUnits': 5,
-                'WriteCapacityUnits': 5
-            }
-        )
-        table.wait_until_exists()
-        print("NexusUsers table created successfully!")
- 
-    if "NexusApiKeys" not in existing_tables:
-        print("Creating NexusApiKeys DynamoDB table...")
-        table = dynamodb.create_table(
-            TableName='NexusApiKeys',
-            KeySchema=[
-                {'AttributeName': 'api_key', 'KeyType': 'HASH'}  # Partition key
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'api_key', 'AttributeType': 'S'},
-                {'AttributeName': 'user_id', 'AttributeType': 'S'}
-            ],
-            GlobalSecondaryIndexes=[
-                {
-                    'IndexName': 'UserIdIndex',
-                    'KeySchema': [
-                        {'AttributeName': 'user_id', 'KeyType': 'HASH'}
-                    ],
-                    'Projection': {'ProjectionType': 'ALL'},
-                    'ProvisionedThroughput': {
-                        'ReadCapacityUnits': 5,
-                        'WriteCapacityUnits': 5
-                    }
-                }
-            ],
-            ProvisionedThroughput={
-                'ReadCapacityUnits': 5,
-                'WriteCapacityUnits': 5
-            }
-        )
-        table.wait_until_exists()
-        print("NexusApiKeys table created successfully!")
- 
-    if "NexusIncidents" not in existing_tables:
-        print("Creating NexusIncidents DynamoDB table...")
-        table = dynamodb.create_table(
-            TableName='NexusIncidents',
-            KeySchema=[
-                {'AttributeName': 'tenant_id', 'KeyType': 'HASH'},  # Partition key
-                {'AttributeName': 'incident_id', 'KeyType': 'RANGE'} # Sort key
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'tenant_id', 'AttributeType': 'S'},
-                {'AttributeName': 'incident_id', 'AttributeType': 'S'}
-            ],
-            ProvisionedThroughput={
-                'ReadCapacityUnits': 5,
-                'WriteCapacityUnits': 5
-            }
-        )
-        table.wait_until_exists()
-        print("NexusIncidents table created successfully!")
- 
-    if "NexusLogs" not in existing_tables:
-        print("Creating NexusLogs DynamoDB table...")
-        table = dynamodb.create_table(
-            TableName='NexusLogs',
-            KeySchema=[
-                {'AttributeName': 'tenant_id', 'KeyType': 'HASH'},  # Partition key
-                {'AttributeName': 'timestamp', 'KeyType': 'RANGE'}  # Sort key
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'tenant_id', 'AttributeType': 'S'},
-                {'AttributeName': 'timestamp', 'AttributeType': 'S'}
-            ],
-            ProvisionedThroughput={
-                'ReadCapacityUnits': 5,
-                'WriteCapacityUnits': 5
-            }
-        )
-        table.wait_until_exists()
-        print("NexusLogs table created successfully!")
- 
-    if "NexusDeployments" not in existing_tables:
-        print("Creating NexusDeployments DynamoDB table...")
-        table = dynamodb.create_table(
-            TableName='NexusDeployments',
-            KeySchema=[
-                {'AttributeName': 'tenant_id', 'KeyType': 'HASH'},  # Partition key
-                {'AttributeName': 'timestamp', 'KeyType': 'RANGE'}  # Sort key
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'tenant_id', 'AttributeType': 'S'},
-                {'AttributeName': 'timestamp', 'AttributeType': 'S'}
-            ],
-            ProvisionedThroughput={
-                'ReadCapacityUnits': 5,
-                'WriteCapacityUnits': 5
-            }
-        )
-        table.wait_until_exists()
-        print("NexusDeployments table created successfully!")
-
-    if "NexusChatHistory" not in existing_tables:
-        print("Creating NexusChatHistory DynamoDB table...")
-        table = dynamodb.create_table(
-            TableName='NexusChatHistory',
-            KeySchema=[
-                {'AttributeName': 'tenant_id', 'KeyType': 'HASH'},  # Partition key
-                {'AttributeName': 'timestamp', 'KeyType': 'RANGE'}  # Sort key
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'tenant_id', 'AttributeType': 'S'},
-                {'AttributeName': 'timestamp', 'AttributeType': 'S'}
-            ],
-            ProvisionedThroughput={
-                'ReadCapacityUnits': 5,
-                'WriteCapacityUnits': 5
-            }
-        )
-        table.wait_until_exists()
-        print("NexusChatHistory table created successfully!")
-
-    if "NexusPredictiveRisks" not in existing_tables:
-        print("Creating NexusPredictiveRisks DynamoDB table...")
-        table = dynamodb.create_table(
-            TableName='NexusPredictiveRisks',
-            KeySchema=[
-                {'AttributeName': 'tenant_id', 'KeyType': 'HASH'},  # Partition key
-                {'AttributeName': 'timestamp', 'KeyType': 'RANGE'}  # Sort key
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'tenant_id', 'AttributeType': 'S'},
-                {'AttributeName': 'timestamp', 'AttributeType': 'S'}
-            ],
-            ProvisionedThroughput={
-                'ReadCapacityUnits': 5,
-                'WriteCapacityUnits': 5
-            }
-        )
-        table.wait_until_exists()
-        print("NexusPredictiveRisks table created successfully!")
+    print("DynamoDB has been removed. PostgreSQL is now used for all tables.")
 
 def get_users_table():
-    return dynamodb.Table('NexusUsers')
+    return MockDynamoTable(User)
  
 def get_keys_table():
-    return dynamodb.Table('NexusApiKeys')
+    return MockDynamoTable(ApiKey)
  
 def get_incidents_table():
-    return dynamodb.Table('NexusIncidents')
+    return MockDynamoTable(Incident)
  
 def get_logs_table():
-    return dynamodb.Table('NexusLogs')
+    return MockDynamoTable(Log)
  
 def get_deployments_table():
-    return dynamodb.Table('NexusDeployments')
+    return MockDynamoTable(Deployment)
 
 def get_chat_history_table():
-    return dynamodb.Table('NexusChatHistory')
+    return MockDynamoTable(ChatHistory)
 
 def get_predictive_risks_table():
-    return dynamodb.Table('NexusPredictiveRisks')
+    return MockDynamoTable(PredictiveRisk)
 
-# --- Log Storage Abstraction Layer (Repository Pattern) ---
+# --- Wrapper functions ---
+
 def store_log(tenant_id: str, timestamp: str, log_data: dict) -> bool:
-    """Stores a log entry using the decoupled repository layer."""
     try:
         table = get_logs_table()
         table.put_item(Item={
@@ -207,9 +137,9 @@ def store_log(tenant_id: str, timestamp: str, log_data: dict) -> bool:
     except Exception as e:
         print(f"Log Repository write failed: {e}")
         return False
- 
+
 def get_logs(tenant_id: str, limit: int = 50) -> list:
-    """Retrieves logs using the decoupled repository layer."""
+    import boto3
     try:
         table = get_logs_table()
         response = table.query(
@@ -221,38 +151,31 @@ def get_logs(tenant_id: str, limit: int = 50) -> list:
     except Exception as e:
         print(f"Log Repository read failed: {e}")
         return []
- 
-# --- Reliability Score Integration ---
+
 def update_reliability_score(email: str, score: float) -> bool:
-    """Updates the user's/tenant's reliability score in their user profile."""
+    db = SessionLocal()
     try:
-        table = get_users_table()
-        # Ensure score is within valid bounds [0, 100]
-        clamped_score = max(0.0, min(100.0, float(score)))
-        table.update_item(
-            Key={'email': email},
-            UpdateExpression="SET reliability_score = :score",
-            ExpressionAttributeValues={':score': str(clamped_score)}
-        )
-        return True
-    except Exception as e:
-        print(f"Failed to update reliability score for {email}: {e}")
+        instance = db.query(User).filter_by(email=email).first()
+        if instance:
+            clamped_score = max(0.0, min(100.0, float(score)))
+            instance.reliability_score = str(clamped_score)
+            db.commit()
+            return True
         return False
- 
+    finally:
+        db.close()
+
 def get_reliability_score(email: str) -> float:
-    """Retrieves the reliability score for a given tenant email."""
+    db = SessionLocal()
     try:
-        table = get_users_table()
-        response = table.get_item(Key={'email': email})
-        if 'Item' in response:
-            return float(response['Item'].get('reliability_score', 100.0))
+        instance = db.query(User).filter_by(email=email).first()
+        if instance:
+            return float(instance.reliability_score)
         return 100.0
-    except Exception as e:
-        print(f"Failed to fetch reliability score: {e}")
-        return 100.0
- 
+    finally:
+        db.close()
+
 def store_deployment(tenant_id: str, timestamp: str, deploy_data: dict) -> bool:
-    """Stores GitHub deployment metadata for correlation."""
     try:
         table = get_deployments_table()
         table.put_item(Item={
@@ -269,14 +192,14 @@ def store_deployment(tenant_id: str, timestamp: str, deploy_data: dict) -> bool:
     except Exception as e:
         print(f"Deployment storage failed: {e}")
         return False
- 
-def get_latest_deployment(tenant_id: str) -> Optional[dict]:
-    """Retrieves the latest deployment for correlation."""
+
+def get_latest_deployment(tenant_id: str):
+    import boto3
     try:
         table = get_deployments_table()
         response = table.query(
             KeyConditionExpression=boto3.dynamodb.conditions.Key('tenant_id').eq(tenant_id),
-            ScanIndexForward=False, # Newest first
+            ScanIndexForward=False,
             Limit=1
         )
         items = response.get('Items', [])
@@ -285,9 +208,7 @@ def get_latest_deployment(tenant_id: str) -> Optional[dict]:
         print(f"Failed to retrieve latest deployment: {e}")
         return None
 
-# --- Chat History Management (with Local Fallback) ---
-def store_chat_message(tenant_id: str, session_id: str, role: str, content: str, image_base64: Optional[str] = None) -> bool:
-    """Saves a single message in the chat history repository."""
+def store_chat_message(tenant_id: str, session_id: str, role: str, content: str, image_base64=None) -> bool:
     timestamp = datetime.datetime.utcnow().isoformat() + "Z"
     try:
         table = get_chat_history_table()
@@ -301,32 +222,11 @@ def store_chat_message(tenant_id: str, session_id: str, role: str, content: str,
         })
         return True
     except Exception as e:
-        print(f"DynamoDB Chat History write failed: {e}. Falling back to local file.")
-        
-    try:
-        local_path = "local_chat_history.json"
-        history = []
-        if os.path.exists(local_path):
-            with open(local_path, "r") as f:
-                history = json.load(f)
-        history.append({
-            'tenant_id': tenant_id,
-            'timestamp': timestamp,
-            'session_id': session_id,
-            'role': role,
-            'content': content,
-            'image_base64': image_base64
-        })
-        history = history[-1000:] # Cap storage history size
-        with open(local_path, "w") as f:
-            json.dump(history, f, indent=2)
-        return True
-    except Exception as local_ex:
-        print(f"Local Chat History write failed: {local_ex}")
+        print(f"PostgreSQL Chat History write failed: {e}")
         return False
 
 def get_chat_sessions(tenant_id: str) -> list:
-    """Retrieves all unique sessions for a tenant. Respects custom titles stored in _meta records."""
+    import boto3
     try:
         table = get_chat_history_table()
         response = table.query(
@@ -335,17 +235,9 @@ def get_chat_sessions(tenant_id: str) -> list:
         items = response.get('Items', [])
     except Exception as e:
         items = []
-        local_path = "local_chat_history.json"
-        if os.path.exists(local_path):
-            try:
-                with open(local_path, "r") as f:
-                    history = json.load(f)
-                items = [msg for msg in history if msg.get('tenant_id') == tenant_id]
-            except:
-                pass
 
     sessions = {}
-    meta_titles = {}  # session_id -> custom title from rename operation
+    meta_titles = {}
 
     for item in items:
         try:
@@ -354,7 +246,6 @@ def get_chat_sessions(tenant_id: str) -> list:
             content = item.get('content') or ''
             timestamp = item.get('timestamp', '')
 
-            # Pick up custom titles stored as _meta records
             if role == '_meta' and item.get('title'):
                 meta_titles[sid] = item.get('title')
                 continue
@@ -376,88 +267,42 @@ def get_chat_sessions(tenant_id: str) -> list:
                 if role == 'user' and sessions[sid]["title"] == "New Chat" and content:
                     sessions[sid]["title"] = content[:60] + "..."
         except Exception as item_ex:
-            print(f"Error parsing chat session item: {item_ex}")
+            pass
 
-    # Apply custom titles from rename operations
     for sid, title in meta_titles.items():
         if sid in sessions:
             sessions[sid]["title"] = title
 
     return sorted(list(sessions.values()), key=lambda x: x['timestamp'], reverse=True)
 
-
 def get_chat_history(tenant_id: str, session_id: str = None, limit: int = 50) -> list:
-    """Retrieves the message logs for a given tenant and session."""
+    import boto3
     try:
         table = get_chat_history_table()
         response = table.query(
             KeyConditionExpression=boto3.dynamodb.conditions.Key('tenant_id').eq(tenant_id),
-            ScanIndexForward=True, # Oldest first so it renders in correct chronological order
-            Limit=limit * 2 # To account for session filtering
+            ScanIndexForward=True,
+            Limit=limit * 2
         )
         items = response.get('Items', [])
         if session_id:
             items = [i for i in items if i.get('session_id', 'default') == session_id]
         return items[-limit:]
     except Exception as e:
-        print(f"DynamoDB Chat History read failed: {e}. Falling back to local file.")
-        
-    try:
-        local_path = "local_chat_history.json"
-        if os.path.exists(local_path):
-            with open(local_path, "r") as f:
-                history = json.load(f)
-            tenant_history = [msg for msg in history if msg.get('tenant_id') == tenant_id]
-            if session_id:
-                tenant_history = [msg for msg in tenant_history if msg.get('session_id', 'default') == session_id]
-            return tenant_history[-limit:]
-        return []
-    except Exception as local_ex:
-        print(f"Local Chat History read failed: {local_ex}")
         return []
 
 def delete_chat_history(tenant_id: str, session_id: str = None) -> bool:
-    """Deletes all message logs for a given tenant."""
+    db = SessionLocal()
     try:
-        table = get_chat_history_table()
-        # Query to get all items
-        response = table.query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key('tenant_id').eq(tenant_id)
-        )
-        items = response.get('Items', [])
         if session_id:
-            items = [i for i in items if i.get('session_id', 'default') == session_id]
-            
-        with table.batch_writer() as batch:
-            for item in items:
-                batch.delete_item(
-                    Key={
-                        'tenant_id': item['tenant_id'],
-                        'timestamp': item['timestamp']
-                    }
-                )
-    except Exception as e:
-        print(f"DynamoDB Chat History delete failed: {e}. Attempting local file.")
-        
-    try:
-        local_path = "local_chat_history.json"
-        if os.path.exists(local_path):
-            with open(local_path, "r") as f:
-                history = json.load(f)
-                
-            if session_id:
-                history = [msg for msg in history if not (msg.get('tenant_id') == tenant_id and msg.get('session_id', 'default') == session_id)]
-            else:
-                history = [msg for msg in history if msg.get('tenant_id') != tenant_id]
-                
-            with open(local_path, "w") as f:
-                json.dump(history, f, indent=2)
+            db.query(ChatHistory).filter_by(tenant_id=tenant_id, session_id=session_id).delete()
+        else:
+            db.query(ChatHistory).filter_by(tenant_id=tenant_id).delete()
+        db.commit()
         return True
-    except Exception as local_ex:
-        print(f"Local Chat History delete failed: {local_ex}")
-        return False
+    finally:
+        db.close()
 
-# --- Predictive Risks Management ---
 def store_predictive_risk(tenant_id: str, risk_data: dict) -> bool:
     timestamp = datetime.datetime.utcnow().isoformat() + "Z"
     try:
@@ -476,44 +321,40 @@ def store_predictive_risk(tenant_id: str, risk_data: dict) -> bool:
         })
         return True
     except Exception as e:
-        print(f"DynamoDB Predictive Risks write failed: {e}")
         return False
 
 def get_predictive_risks(tenant_id: str, limit: int = 50) -> list:
+    import boto3
     try:
         table = get_predictive_risks_table()
         response = table.query(
             KeyConditionExpression=boto3.dynamodb.conditions.Key('tenant_id').eq(tenant_id),
-            ScanIndexForward=False, # Newest first
+            ScanIndexForward=False,
             Limit=limit
         )
         return response.get('Items', [])
     except Exception as e:
-        print(f"DynamoDB Predictive Risks read failed: {e}")
         return []
 
-# --- Integrations Storage ---
 def update_user_integrations(email: str, integrations: dict) -> bool:
+    db = SessionLocal()
     try:
-        table = get_users_table()
-        table.update_item(
-            Key={'email': email},
-            UpdateExpression="SET integrations = :i",
-            ExpressionAttributeValues={':i': integrations}
-        )
-        return True
-    except Exception as e:
-        print(f"Failed to update integrations for {email}: {e}")
+        instance = db.query(User).filter_by(email=email).first()
+        if instance:
+            instance.integrations = integrations
+            db.commit()
+            return True
         return False
+    finally:
+        db.close()
 
 def get_user_integrations(email: str) -> dict:
+    db = SessionLocal()
     try:
-        table = get_users_table()
-        response = table.get_item(Key={'email': email})
-        if 'Item' in response:
-            return response['Item'].get('integrations', {})
+        instance = db.query(User).filter_by(email=email).first()
+        if instance and instance.integrations:
+            return instance.integrations
         return {}
-    except Exception as e:
-        print(f"Failed to fetch integrations: {e}")
-        return {}
+    finally:
+        db.close()
 

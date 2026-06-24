@@ -145,7 +145,7 @@ jobs:
       acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
     secrets: inherit
 
-  deploy:
+  update-dev-gitops:
     needs: [detect-changes, publish]
     if: ${{ needs.detect-changes.outputs.gitops_matrix != '{"include":[]}' }}
     strategy:
@@ -164,7 +164,7 @@ jobs:
     secrets: inherit
 
   notify-on-failure:
-    needs: [detect-changes, sast, sca, dockerfile-check, image-build-and-scan, publish, deploy]
+    needs: [detect-changes, sast, sca, dockerfile-check, image-build-and-scan, publish, update-dev-gitops]
     if: always() && contains(needs.*.result, 'failure')
     uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-notify.yml@main
     with:

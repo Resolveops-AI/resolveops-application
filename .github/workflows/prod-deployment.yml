@@ -128,7 +128,7 @@ jobs:
       acr_login_server: ${{ vars.ACR_LOGIN_SERVER }}
     secrets: inherit
 
-  deploy:
+  update-prod-gitops:
     needs: [validate-and-prepare, publish]
     strategy:
       fail-fast: false
@@ -146,7 +146,7 @@ jobs:
     secrets: inherit
 
   notify-on-failure:
-    needs: [validate-and-prepare, sast, sca, dockerfile-check, image-build-and-scan, publish, deploy]
+    needs: [validate-and-prepare, sast, sca, dockerfile-check, image-build-and-scan, publish, update-prod-gitops]
     if: always() && contains(needs.*.result, 'failure')
     uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-notify.yml@main
     with:

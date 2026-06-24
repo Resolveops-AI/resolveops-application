@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from services.payment_service.routes.payment import router as payment_router
 import uvicorn
 import sys
@@ -13,11 +13,19 @@ load_dotenv()
 
 app = FastAPI(title="Quick-Haul Payment Service", version="1.0.0")
 
-app.include_router(payment_router, tags=["Payment"])
+router = APIRouter(prefix="/api/payments")
 
-@app.get("/health")
+@router.get("")
+@router.get("/")
+async def root_health():
+    return {"status": "healthy"}
+
+@router.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "payment-service"}
+
+app.include_router(router)
+app.include_router(payment_router, prefix="/api/payments", tags=["Payment"])
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8006, reload=True)

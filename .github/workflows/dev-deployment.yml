@@ -129,7 +129,7 @@ jobs:
       dockerfile_path: ${{ matrix.dockerfile_path }}
     secrets: inherit
 
-  publish:
+  publish-dev-image:
     needs: [detect-changes, sast, sca, dockerfile-check, image-build-and-scan]
     if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
     strategy:
@@ -146,7 +146,7 @@ jobs:
     secrets: inherit
 
   update-dev-gitops:
-    needs: [detect-changes, publish]
+    needs: [detect-changes, publish-dev-image]
     if: ${{ needs.detect-changes.outputs.gitops_matrix != '{"include":[]}' }}
     strategy:
       fail-fast: false
@@ -164,7 +164,7 @@ jobs:
     secrets: inherit
 
   notify-on-failure:
-    needs: [detect-changes, sast, sca, dockerfile-check, image-build-and-scan, publish, update-dev-gitops]
+    needs: [detect-changes, sast, sca, dockerfile-check, image-build-and-scan, publish-dev-image, update-dev-gitops]
     if: always() && contains(needs.*.result, 'failure')
     uses: Resolveops-AI/resolveops-templates/.github/workflows/reusable-notify.yml@main
     with:

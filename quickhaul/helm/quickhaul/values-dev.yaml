@@ -22,7 +22,7 @@ bookingService:
   replicaCount: 1
 notificationService:
   image:
-    tag: "dev-db708c1"
+    tag: "dev-ea13f99"
   replicaCount: 1
 otpService:
   image:

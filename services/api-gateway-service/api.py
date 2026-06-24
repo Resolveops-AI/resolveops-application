@@ -93,9 +93,9 @@ class ApiKeyResponse(BaseModel):
     name: str
 
 # --- OTP Endpoint ---
-@app.post("/api/request-otp")
+@app.post("/api/request-otp", status_code=202)
 def request_otp(req: OTPRequest):
-    """Generate and email a 6-digit OTP for email verification."""
+    """Generate and queue a 6-digit OTP for email verification via Service Bus."""
     # Check if email already registered
     users_table = get_users_table()
     existing = users_table.get_item(Key={'email': req.email})
@@ -103,31 +103,57 @@ def request_otp(req: OTPRequest):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     otp_code = str(random.randint(100000, 999999))
+    expires_at = time.time() + 120
     otp_store[req.email] = {
         "otp": otp_code,
         "full_name": req.full_name,
-        "expires": time.time() + 120  # 2-minute TTL
+        "expires": expires_at  # 2-minute TTL
     }
 
-    # Send OTP email
-    success = notifications.send_otp_email(
-        email=req.email,
-        full_name=req.full_name,
-        otp_code=otp_code
-    )
-    
-    if not success:
+    if os.getenv("DEBUG_LOG_OTP", "false").lower() == "true":
+        print(f"[DEV-ONLY] Generated OTP for {req.email}: {otp_code}")
+
+    sb_fqdn = os.getenv("SERVICE_BUS_FQDN")
+    sb_queue = os.getenv("SERVICE_BUS_QUEUE_NAME", "notification-requested")
+
+    if not sb_fqdn:
+        print("Warning: SERVICE_BUS_FQDN not set, skipping Service Bus publish")
+        return {"message": f"OTP requested for {req.email}. (Service Bus not configured)"}
+
+    try:
+        from azure.servicebus import ServiceBusClient, ServiceBusMessage
+        from azure.identity import DefaultAzureCredential
+        import json
+
+        credential = DefaultAzureCredential()
+        with ServiceBusClient(sb_fqdn, credential=credential) as client:
+            with client.get_queue_sender(sb_queue) as sender:
+                msg_payload = {
+                    "type": "otp",
+                    "email": req.email,
+                    "full_name": req.full_name,
+                    "otp_code": otp_code,
+                    "correlation_id": str(uuid.uuid4()),
+                    "created_at": time.time(),
+                    "expires_at": expires_at
+                }
+                message = ServiceBusMessage(json.dumps(msg_payload))
+                sender.send_messages(message)
+                print(f"Successfully queued OTP notification for {req.email} to {sb_queue}")
+
+    except Exception as e:
+        print(f"Failed to publish OTP to Service Bus: {e}")
         # Remove from store since it failed
         del otp_store[req.email]
         raise HTTPException(
-            status_code=502,
+            status_code=503,
             detail={
-                "status": "email_send_failed",
-                "message": "Failed to send OTP email. Please check SMTP sender verification."
+                "status": "service_bus_publish_failed",
+                "message": "Failed to queue OTP notification. Service unavailable."
             }
         )
 
-    return {"message": f"OTP sent to {req.email}. Please check your inbox."}
+    return {"message": f"OTP queued for {req.email}. Please check your inbox."}
 
 # --- Auth Endpoints (DynamoDB) ---
 @app.post("/api/register")

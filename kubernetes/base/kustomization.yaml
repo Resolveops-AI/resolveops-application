@@ -31,10 +31,10 @@ images:
 - name: resolveopsacr05.azurecr.io/aws-intelligence-service
   newTag: v1.0.0
 - name: resolveopsacr05.azurecr.io/azure-intelligence-service
-  newTag: "4"
+  newTag: v1.0.0
 - name: resolveopsacr05.azurecr.io/github-intelligence-service
   newTag: v1.0.0
 - name: resolveopsacr05.azurecr.io/notification-service
-  newTag: "4"
+  newTag: v1.0.0
 - name: resolveopsacr05.azurecr.io/resolveops-frontend
   newTag: "4"

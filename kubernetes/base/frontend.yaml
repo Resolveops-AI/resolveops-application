@@ -21,7 +21,7 @@ spec:
         fsGroup: 10001
       containers:
       - name: frontend
-        image: resolveopsacr05.azurecr.io/frontend:latest
+        image: resolveopsacr05.azurecr.io/resolveops-frontend:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3000

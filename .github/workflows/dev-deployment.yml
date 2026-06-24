@@ -87,12 +87,9 @@ jobs:
   sast:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
     uses: Resolveops-AI/resolveops-templates/.github/workflows/_sast.yml@main
     with:
-      working_directory: ${{ matrix.context_path }}
+      working_directory: "."
     secrets: inherit
 
   sca:

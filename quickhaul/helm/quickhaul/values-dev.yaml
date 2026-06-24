@@ -35,7 +35,7 @@ paymentService:
 config:
   mongoUri: mongodb://quickhaul-mongodb:27017
   redisUrl: redis://quickhaul-redis:6379/0
-  frontendUrl: http://dev.quickhaul.sathvikdevops.site
+  frontendUrl: https://quickhaul.sathvikdevops.site
 mongodb:
   auth:
     username: quickhaul
@@ -50,7 +50,7 @@ redis:
 ingress:
   enabled: true
   className: azure-application-gateway
-  host: dev.quickhaul.sathvikdevops.site
+  host: quickhaul.sathvikdevops.site
 resources:
   requests:
     cpu: 100m

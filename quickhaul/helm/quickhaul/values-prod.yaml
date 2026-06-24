@@ -20,7 +20,7 @@ bookingService:
   replicaCount: 2
 notificationService:
   image:
-    tag: v0.0.0
+    tag: v2.0.0
   replicaCount: 2
 otpService:
   image:

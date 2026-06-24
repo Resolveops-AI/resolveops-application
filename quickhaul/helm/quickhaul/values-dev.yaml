@@ -10,27 +10,27 @@ frontend:
     type: LoadBalancer
 locationService:
   image:
-    tag: "dev-faa8392"
+    tag: "dev-db708c1"
   replicaCount: 1
 authService:
   image:
-    tag: "dev-faa8392"
+    tag: "dev-db708c1"
   replicaCount: 1
 bookingService:
   image:
-    tag: "dev-faa8392"
+    tag: "dev-db708c1"
   replicaCount: 1
 notificationService:
   image:
-    tag: "dev-faa8392"
+    tag: "dev-db708c1"
   replicaCount: 1
 otpService:
   image:
-    tag: "dev-faa8392"
+    tag: "dev-db708c1"
   replicaCount: 1
 paymentService:
   image:
-    tag: "dev-faa8392"
+    tag: "dev-db708c1"
   replicaCount: 1
 config:
   mongoUri: mongodb://quickhaul-mongodb:27017

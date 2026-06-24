@@ -36,6 +36,11 @@ spec:
             secretKeyRef:
               name: resolveops-secrets
               key: DATABASE_URL
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: resolveops-secrets
+              key: JWT_SECRET
         resources:
           requests:
             cpu: 100m

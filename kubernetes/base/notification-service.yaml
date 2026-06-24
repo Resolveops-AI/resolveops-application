@@ -30,6 +30,17 @@ spec:
         envFrom:
         - configMapRef:
             name: resolveops-config
+        env:
+        - name: SMTP_USER
+          valueFrom:
+            secretKeyRef:
+              name: resolveops-app-secrets
+              key: SMTP_USER
+        - name: SMTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: resolveops-app-secrets
+              key: SMTP_PASSWORD
         resources:
           requests:
             cpu: 100m

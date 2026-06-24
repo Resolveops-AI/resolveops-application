@@ -7,7 +7,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/Resolveops-AI/resolveops-application.git
-    targetRevision: feature/dev
+    targetRevision: main
     path: kubernetes/base
     # Image tags in kustomization.yaml are updated by resolveops-ci.yml
     # after each successful build (kustomize edit set image).

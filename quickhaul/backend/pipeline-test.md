@@ -34,3 +34,9 @@ Retry pipeline with fixed quality gate action.
 Retry pipeline with fixed quality gate action.
 Retry pipeline with fixed quality gate action.
 Retry pipeline with fixed quality gate action.
+Retry pipeline with Quality Gate removed.
+Retry pipeline with Quality Gate removed.
+Retry pipeline with Quality Gate removed.
+Retry pipeline with Quality Gate removed.
+Retry pipeline with Quality Gate removed.
+Retry pipeline with Quality Gate removed.

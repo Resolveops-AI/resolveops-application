@@ -82,3 +82,9 @@ Retry pipeline with built-in Quality Gate wait.
 Retry pipeline with built-in Quality Gate wait.
 Retry pipeline with built-in Quality Gate wait.
 Retry pipeline with built-in Quality Gate wait.
+Retry pipeline with completely native Quality Gate integration.
+Retry pipeline with completely native Quality Gate integration.
+Retry pipeline with completely native Quality Gate integration.
+Retry pipeline with completely native Quality Gate integration.
+Retry pipeline with completely native Quality Gate integration.
+Retry pipeline with completely native Quality Gate integration.

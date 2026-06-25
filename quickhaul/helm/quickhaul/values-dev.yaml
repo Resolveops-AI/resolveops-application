@@ -4,7 +4,7 @@ global:
   imageRegistry: "" # injected via ArgoCD helm.parameter
 frontend:
   image:
-    tag: "dev-0835b74"
+    tag: "dev-2e78c7a"
   replicaCount: 1
   service:
     type: LoadBalancer

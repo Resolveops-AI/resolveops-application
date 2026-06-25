@@ -4,38 +4,38 @@ global:
   imageRegistry: "" # injected via ArgoCD helm.parameter
 frontend:
   image:
-    tag: "dev-125f9fd"
+    tag: "dev-2e78c7a"
   replicaCount: 1
   service:
     type: LoadBalancer
 locationService:
   image:
-    tag: "dev-125f9fd"
+    tag: "dev-2e78c7a"
   replicaCount: 1
 authService:
   image:
-    tag: "dev-125f9fd"
+    tag: "dev-2e78c7a"
   replicaCount: 1
 bookingService:
   image:
-    tag: "dev-125f9fd"
+    tag: "dev-2e78c7a"
   replicaCount: 1
 notificationService:
   image:
-    tag: "dev-125f9fd"
+    tag: "dev-2e78c7a"
   replicaCount: 1
 otpService:
   image:
-    tag: "dev-125f9fd"
+    tag: "dev-2e78c7a"
   replicaCount: 1
 paymentService:
   image:
-    tag: "dev-125f9fd"
+    tag: "dev-2e78c7a"
   replicaCount: 1
 config:
   mongoUri: mongodb://quickhaul-mongodb:27017
   redisUrl: redis://quickhaul-redis:6379/0
-  frontendUrl: http://dev.quickhaul.sathvikdevops.site
+  frontendUrl: https://quickhaul.sathvikdevops.site
 mongodb:
   auth:
     username: quickhaul
@@ -50,7 +50,7 @@ redis:
 ingress:
   enabled: true
   className: azure-application-gateway
-  host: dev.quickhaul.sathvikdevops.site
+  host: quickhaul.sathvikdevops.site
 resources:
   requests:
     cpu: 100m

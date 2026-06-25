@@ -16,6 +16,7 @@ on:
 permissions:
   id-token: write
   contents: write
+  pull-requests: write
 
 jobs:
   detect-changes:
@@ -92,17 +93,17 @@ jobs:
       working_directory: "."
     secrets: inherit
 
-#  sca:
-#    needs: detect-changes
-#    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
-#    strategy:
-#      fail-fast: false
-#      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
-#    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
-#    with:
-#      working_directory: ${{ matrix.context_path }}
-#      service_name: ${{ matrix.service_name }}
-#    secrets: inherit
+  sca:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+    uses: Resolveops-AI/resolveops-templates/.github/workflows/_sca.yml@main
+    with:
+      working_directory: ${{ matrix.context_path }}
+      service_name: ${{ matrix.service_name }}
+    secrets: inherit
 
   dockerfile-check:
     needs: detect-changes

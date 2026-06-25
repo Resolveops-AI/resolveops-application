@@ -96,7 +96,6 @@ jobs:
   sca:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.build_matrix != '{"include":[]}' }}
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}

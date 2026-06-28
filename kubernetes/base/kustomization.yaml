@@ -20,6 +20,9 @@ resources:
 
 
 images:
+- name: azure-intelligence-service
+  newName: azure-intelligence-service
+  newTag: v2.0.0
 - name: resolveopsacr05.azurecr.io/ai-rca-service
   newTag: v1.0.0
 - name: resolveopsacr05.azurecr.io/api-gateway-service
@@ -35,4 +38,4 @@ images:
 - name: resolveopsacr05.azurecr.io/notification-service
   newTag: v1.0.0
 - name: resolveopsacr05.azurecr.io/resolveops-frontend
-  newTag: "v1.0.0"
+  newTag: v1.0.0

@@ -4,33 +4,33 @@ global:
   imageRegistry: "" # injected via ArgoCD helm.parameter
 frontend:
   image:
-    tag: "dev-2e78c7a"
+    tag: "dev-f318e43"
   replicaCount: 1
   service:
     type: LoadBalancer
 locationService:
   image:
-    tag: "dev-2e78c7a"
+    tag: "dev-85b4c76"
   replicaCount: 1
 authService:
   image:
-    tag: "dev-2e78c7a"
+    tag: "dev-85b4c76"
   replicaCount: 1
 bookingService:
   image:
-    tag: "dev-2e78c7a"
+    tag: "dev-85b4c76"
   replicaCount: 1
 notificationService:
   image:
-    tag: "dev-2e78c7a"
+    tag: "dev-85b4c76"
   replicaCount: 1
 otpService:
   image:
-    tag: "dev-2e78c7a"
+    tag: "dev-85b4c76"
   replicaCount: 1
 paymentService:
   image:
-    tag: "dev-2e78c7a"
+    tag: "dev-85b4c76"
   replicaCount: 1
 config:
   mongoUri: mongodb://quickhaul-mongodb:27017
@@ -51,6 +51,13 @@ ingress:
   enabled: true
   className: azure-application-gateway
   host: quickhaul.sathvikdevops.site
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    appgw.ingress.kubernetes.io/health-probe-status-codes: "200-399,404"
+  tls:
+    - hosts:
+        - quickhaul.sathvikdevops.site
+      secretName: quickhaul-tls
 resources:
   requests:
     cpu: 100m

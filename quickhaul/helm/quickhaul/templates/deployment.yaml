@@ -132,7 +132,7 @@ spec:
                   name: {{ include "quickhaul.mongodbSecretName" $root }}
                   key: database
             - name: MONGO_URI
-              value: "mongodb://$(MONGO_USERNAME):$(MONGO_PASSWORD)@$(MONGO_HOST).{{ $root.Values.namespaceOverride | default $root.Release.Namespace }}.svc.cluster.local:$(MONGO_PORT)/$(MONGO_DATABASE)"
+              value: "mongodb://$(MONGO_USERNAME):$(MONGO_PASSWORD)@$(MONGO_HOST).{{ $root.Values.namespaceOverride | default $root.Release.Namespace }}.svc.cluster.local:$(MONGO_PORT)/$(MONGO_DATABASE)?authSource=admin"
           {{- end }}
           resources:
             {{- toYaml $vals.resources | nindent 12 }}

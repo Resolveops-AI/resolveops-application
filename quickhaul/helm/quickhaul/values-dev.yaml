@@ -10,7 +10,7 @@ frontend:
     type: LoadBalancer
 locationService:
   image:
-    tag: "dev-85b4c76"
+    tag: "dev-336bea7"
   replicaCount: 1
 authService:
   image:

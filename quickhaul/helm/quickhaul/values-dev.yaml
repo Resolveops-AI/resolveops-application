@@ -14,7 +14,7 @@ locationService:
   replicaCount: 1
 authService:
   image:
-    tag: "dev-f318e43"
+    tag: "dev-85b4c76"
   replicaCount: 1
 bookingService:
   image:

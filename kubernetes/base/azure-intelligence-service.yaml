@@ -1,11 +1,11 @@
-apiVersion: apps/v1
+  apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: azure-intelligence-service
   labels:
     app: azure-intelligence-service
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: azure-intelligence-service

@@ -5,7 +5,7 @@ metadata:
   labels:
     app: aws-intelligence-service
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: aws-intelligence-service

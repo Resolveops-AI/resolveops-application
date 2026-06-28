@@ -53,6 +53,7 @@ ingress:
   host: quickhaul.sathvikdevops.site
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    appgw.ingress.kubernetes.io/health-probe-status-codes: "200-399,404"
   tls:
     - hosts:
         - quickhaul.sathvikdevops.site

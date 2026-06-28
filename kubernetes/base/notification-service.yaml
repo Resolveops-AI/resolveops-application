@@ -41,6 +41,10 @@ spec:
             secretKeyRef:
               name: resolveops-app-secrets
               key: SMTP_PASSWORD
+        - name: AZURE_CLIENT_ID
+          value: "ab0e6d5f-bff8-4046-acb3-250739f98ae8"
+        - name: AZURE_TENANT_ID
+          value: "81c422d3-b9ef-49b9-b8a9-b10a5f4ce484"
         resources:
           requests:
             cpu: 100m

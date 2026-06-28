@@ -51,6 +51,12 @@ ingress:
   enabled: true
   className: azure-application-gateway
   host: quickhaul.sathvikdevops.site
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  tls:
+    - hosts:
+        - quickhaul.sathvikdevops.site
+      secretName: quickhaul-tls
 resources:
   requests:
     cpu: 100m

@@ -2,10 +2,17 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: resolveops-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    appgw.ingress.kubernetes.io/health-probe-status-codes: "200-399,404"
 spec:
   ingressClassName: azure-application-gateway
+  tls:
+  - hosts:
+    - resolveops.sathvikdevops.site
+    secretName: resolveops-tls
   rules:
-  - host: resolveops-ai.sathvikdevops.online
+  - host: resolveops.sathvikdevops.site
     http:
       paths:
       - path: /api

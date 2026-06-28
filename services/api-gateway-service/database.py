@@ -2,8 +2,12 @@ import datetime
 import os
 import json
 from pg_database import (
-    SessionLocal, User, ApiKey, Incident, Log, Deployment, ChatHistory, PredictiveRisk
+    User, ApiKey, Incident, Log, Deployment, ChatHistory, PredictiveRisk
 )
+import pg_database
+
+def SessionLocal():
+    return pg_database.SessionLocal()
 
 class MockDynamoTable:
     def __init__(self, model):

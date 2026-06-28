@@ -114,32 +114,40 @@ def request_otp(req: OTPRequest):
         print(f"[DEV-ONLY] Generated OTP for {req.email}: {otp_code}")
 
     sb_fqdn = os.getenv("SERVICE_BUS_FQDN")
+    sb_conn_str = os.getenv("SERVICE_BUS_CONNECTION_STRING")
     sb_queue = os.getenv("SERVICE_BUS_QUEUE_NAME", "notification-requested")
 
-    if not sb_fqdn:
-        print("Warning: SERVICE_BUS_FQDN not set, skipping Service Bus publish")
+    if not sb_fqdn and not sb_conn_str:
+        print("Warning: SERVICE_BUS_FQDN and SERVICE_BUS_CONNECTION_STRING not set, skipping Service Bus publish")
         return {"message": f"OTP requested for {req.email}. (Service Bus not configured)"}
 
     try:
         from azure.servicebus import ServiceBusClient, ServiceBusMessage
-        from azure.identity import DefaultAzureCredential
         import json
 
-        credential = DefaultAzureCredential()
-        with ServiceBusClient(sb_fqdn, credential=credential) as client:
-            with client.get_queue_sender(sb_queue) as sender:
-                msg_payload = {
-                    "type": "otp",
-                    "email": req.email,
-                    "full_name": req.full_name,
-                    "otp_code": otp_code,
-                    "correlation_id": str(uuid.uuid4()),
-                    "created_at": time.time(),
-                    "expires_at": expires_at
-                }
-                message = ServiceBusMessage(json.dumps(msg_payload))
-                sender.send_messages(message)
-                print(f"Successfully queued OTP notification for {req.email} to {sb_queue}")
+        msg_payload = {
+            "type": "otp",
+            "email": req.email,
+            "full_name": req.full_name,
+            "otp_code": otp_code,
+            "correlation_id": str(uuid.uuid4()),
+            "created_at": time.time(),
+            "expires_at": expires_at
+        }
+        message = ServiceBusMessage(json.dumps(msg_payload))
+
+        if sb_conn_str:
+            with ServiceBusClient.from_connection_string(sb_conn_str) as client:
+                with client.get_queue_sender(sb_queue) as sender:
+                    sender.send_messages(message)
+                    print(f"Successfully queued OTP notification for {req.email} to {sb_queue} via connection string")
+        else:
+            from azure.identity import ManagedIdentityCredential
+            credential = ManagedIdentityCredential(client_id=os.getenv("AZURE_CLIENT_ID"))
+            with ServiceBusClient(sb_fqdn, credential=credential) as client:
+                with client.get_queue_sender(sb_queue) as sender:
+                    sender.send_messages(message)
+                    print(f"Successfully queued OTP notification for {req.email} to {sb_queue} via managed identity")
 
     except Exception as e:
         print(f"Failed to publish OTP to Service Bus: {e}")

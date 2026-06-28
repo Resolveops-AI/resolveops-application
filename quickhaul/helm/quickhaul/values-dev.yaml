@@ -4,33 +4,33 @@ global:
   imageRegistry: "" # injected via ArgoCD helm.parameter
 frontend:
   image:
-    tag: "dev-f318e43"
+    tag: "dev-d6d413b"
   replicaCount: 1
   service:
     type: LoadBalancer
 locationService:
   image:
-    tag: "dev-85b4c76"
+    tag: "dev-d6d413b"
   replicaCount: 1
 authService:
   image:
-    tag: "dev-85b4c76"
+    tag: "dev-d6d413b"
   replicaCount: 1
 bookingService:
   image:
-    tag: "dev-85b4c76"
+    tag: "dev-d6d413b"
   replicaCount: 1
 notificationService:
   image:
-    tag: "dev-85b4c76"
+    tag: "dev-d6d413b"
   replicaCount: 1
 otpService:
   image:
-    tag: "dev-85b4c76"
+    tag: "dev-d6d413b"
   replicaCount: 1
 paymentService:
   image:
-    tag: "dev-85b4c76"
+    tag: "dev-d6d413b"
   replicaCount: 1
 config:
   mongoUri: mongodb://quickhaul-mongodb:27017

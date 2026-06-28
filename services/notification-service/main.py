@@ -15,18 +15,22 @@ async def startup_event():
 
 async def consume_service_bus():
     sb_fqdn = os.getenv("SERVICE_BUS_FQDN")
+    sb_conn_str = os.getenv("SERVICE_BUS_CONNECTION_STRING")
     sb_queue = os.getenv("SERVICE_BUS_QUEUE_NAME", "notification-requested")
     
-    if not sb_fqdn:
-        logger.warning("SERVICE_BUS_FQDN not set. Service Bus consumer is disabled.")
+    if not sb_fqdn and not sb_conn_str:
+        logger.warning("SERVICE_BUS_FQDN and SERVICE_BUS_CONNECTION_STRING not set. Service Bus consumer is disabled.")
         return
 
     from azure.servicebus.aio import ServiceBusClient
-    from azure.identity.aio import DefaultAzureCredential
 
     try:
-        credential = DefaultAzureCredential()
-        client = ServiceBusClient(sb_fqdn, credential=credential)
+        if sb_conn_str:
+            client = ServiceBusClient.from_connection_string(sb_conn_str)
+        else:
+            from azure.identity.aio import DefaultAzureCredential
+            credential = DefaultAzureCredential()
+            client = ServiceBusClient(sb_fqdn, credential=credential)
         receiver = client.get_queue_receiver(queue_name=sb_queue)
         
         logger.info(f"Started listening to Service Bus queue: {sb_queue}")
